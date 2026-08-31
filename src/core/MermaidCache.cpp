@@ -52,6 +52,11 @@ bool MermaidCache::rendererAvailable() const
     return m_renderer && m_renderer->isAvailable();
 }
 
+qreal MermaidCache::outputScale() const
+{
+    return m_renderer ? m_renderer->outputScale() : 1.0;
+}
+
 int MermaidCache::pendingCount() const
 {
     return m_queue.size() + (m_busy ? 1 : 0);

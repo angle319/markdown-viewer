@@ -96,7 +96,7 @@ tests/                       QtTest
 ### MarkdownParser
 輸入 md 文字與檔案所在目錄，輸出 `Document`。責任：
 - 透過 md4c 產生 HTML，只用 Qt rich-text 支援的標籤子集
-- 抽取 heading 建 TOC，slug 採 GitHub 規則（小寫、空白轉 `-`、去標點），重複時加 `-2`
+- 抽取 heading 建 TOC，slug 採 GitHub 規則（小寫、空白轉 `-`、去標點），重複時依 GitHub 行為加 `-1`、`-2`…
 - 把 ` ```mermaid ` fence 抽出成 `mermaidBlocks[]`，原位置換成 `<img src="mermaid://<key>">`
 - 其他 fenced code 交給 `CodeHighlighter` 轉成 inline `<span style>` 上色
 - 換掉不支援標籤：`<del>`→`<s>`；task list `- [x]` → `☑`/`☐` 字元（Qt 不渲染 checkbox input）
@@ -169,9 +169,8 @@ GUI 層薄，靠手動驗收。
 
 ## 9. 已知風險
 
-1. **Qt SVG Tiny 對 mermaid 產出的支援度未驗。** 產出含 `<style>` 區塊、11 個 `filter`、
-   11 個 `pattern`、10 處 `rgba()`。最壞情況是陰影遺失或顏色掉為黑色。
-   緩解：快取層格式無關，可切 PNG @2x（`mmdc -o out.png -s 2`），改一行設定。
+1. ~~**Qt SVG Tiny 對 mermaid 產出的支援度未驗。**~~ **已有定論：撐不住，改用 PNG。**
+   見第 12 節的實測結果。
 2. **QTextBrowser 無 flex/grid**，版面只能單欄文件流。對 reader 足夠，但不能做並排版面。
 3. **`QTextDocument` 建完整物件樹**，超過 10MB 的 md 會開始鈍。v0.1 接受；
    真要處理巨檔需換 Qt Quick 虛擬化路線。
@@ -192,3 +191,88 @@ graphviz mermaid 譯法、列印。
 ```
 sudo apt install cmake qt6-base-dev qt6-svg-dev qt6-tools-dev-tools
 ```
+
+## 12. 實測結果（2026-08-31）
+
+### 12.1 SVG 路線失敗，改用 PNG
+
+原設計是「mmdc 產 SVG → QSvgRenderer 光柵化」。實測後放棄，改為
+「mmdc 直接產 PNG @devicePixelRatio → QImage 載入」。
+
+`htmlLabels:false` 確實消除了 `<foreignObject>`，文字也變成真正的 `<text>`，
+差分測試（帶文字 vs 空標籤）顯示 Qt 的墨水密度 0.667 vs 0.482，證明**文字有被畫出來**。
+但那個測試太弱，通過了卻沒抓到真正的問題。實際渲染出來的畫面是壞的：
+
+- **所有連線與箭頭整批消失**（Qt SVG Tiny 不支援 `<marker>`）
+- 節點文字被畫在方框上緣，而非垂直居中
+- 邊標籤旁出現灰色實心方塊
+- 原點殘留一個黑色三角形（marker 定義被畫在 (0,0)）
+
+決定性的量化證據：對 `flowchart LR  A[AAAAAAAA] --> B[BBBBBBBB]`，
+量測影像正中央水平帶（兩節點之間，只可能被連線佔用）的深色像素數 ——
+
+| 路徑 | 中央帶墨水 |
+|---|---|
+| SVG 經 QSvgRenderer | **0** |
+| PNG 經 Chromium | **249** |
+
+改用 PNG 後畫面完全正確。此結論由 `tests/test_mmdc_integration.cpp` 的
+`svgOutputLosesEdgesInQt()` 盯住：若哪天 Qt 支援了 `<marker>`，那支測試會失敗，
+那就是重新評估 SVG 的時機。
+
+光柵化倍率跟著螢幕的 `devicePixelRatio`（1x 螢幕用 2 倍等於白花一倍記憶體），
+且倍率計入 `rendererId` 進而計入快取 key，換螢幕不會拿到錯解析度的舊圖。
+
+### 12.2 記憶體實測
+
+量整個行程樹的 PSS（`/proc/<pid>/smaps_rollup`）。RSS 會把共享函式庫頁面重複
+計算，故不作為結論。
+
+| 情境 | PSS | RSS |
+|---|---|---|
+| 三行小檔（基準） | **32.7 MB** | 65.7 MB |
+| `docs/sample.md`（含 2 張 mermaid） | **38.1 MB** | 80.5 MB |
+
+達成 40MB 目標，但過程中發現一個吃掉三分之一預算的東西：
+
+**`QT_XCB_GL_INTEGRATION=none`**。依映射來源分組 PSS 後，最大單項是
+`libLLVM-15.so.1` 佔 **13.2 MB** —— 那是 Mesa 的 llvmpipe，被 xcb QPA 的
+GL 整合連帶拉進來的。這個 app 全程 raster 繪製，完全不需要 OpenGL。
+在 `QApplication` 建立前設掉這個變數後：
+
+| | 基準 | sample.md |
+|---|---|---|
+| 未設定 | 49.1 MB | 55.5 MB |
+| `GL_INTEGRATION=none` | **32.7 MB** | **38.1 MB** |
+
+已寫進 `src/main.cpp`（使用者若明確設過就尊重其設定）。
+
+### 12.3 版面調整
+
+`QTextDocument::setIndentWidth(20)`。Qt 預設縮排單位是 40px，巢狀清單與引用
+區塊在中文字體下縮得很誇張，而 Qt rich-text 不吃 CSS 的 `margin-left`／
+`padding-left` 來調清單縮排，文件層級的 `indentWidth` 是唯一有效的旋鈕。
+
+### 12.4 測試
+
+71 個測試函式，6 個套件，全數通過：
+
+| 套件 | 函式數 | 內容 |
+|---|---|---|
+| markdownparser | 15 | 錨點規則、mermaid 抽取、轉義、圖片路徑 |
+| codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
+| mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
+| mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
+| e2e_viewer | 14 | 驅動真正的 MainWindow 走使用者流程 |
+| e2e_regression | 17 | 以 sample.md 為語料庫釘住 pipeline 不變式 |
+
+e2e 以 `QT_QPA_PLATFORM=offscreen` 執行，不需要 X／Wayland。
+設 `MD_E2E_DUMP=<目錄>` 可額外輸出畫面 PNG 供人眼檢查 —— 自動化斷言驗得了
+結構，驗不了「看起來對不對」，SVG 那個坑就是這樣才被抓到的。
+
+### 12.5 e2e 抓到的真 bug
+
+`MainWindow::reparse()` 原本先 `setDocument()` 才 `setToc()`。後端在
+`setDocument()` 內就會發出 `currentTocIndexChanged`，而 `TocPanel` 隨後被
+`setToc()` 清空重建，於是捲動高亮永遠是空的。順序反過來即修好。
+由 `scrollingUpdatesTocHighlight()` 盯住。

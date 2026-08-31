@@ -88,6 +88,11 @@ QString MmdcRenderer::findMmdc()
     return QString();
 }
 
+qreal MmdcRenderer::outputScale() const
+{
+    return m_outputExtension == QStringLiteral("png") ? qreal(m_pngScale) : 1.0;
+}
+
 bool MmdcRenderer::isAvailable() const
 {
     return !m_exe.isEmpty();
@@ -95,19 +100,26 @@ bool MmdcRenderer::isAvailable() const
 
 QString MmdcRenderer::rendererId() const
 {
-    if (!m_versionCache.isEmpty())
-        return m_versionCache;
-    if (m_exe.isEmpty())
-        return QStringLiteral("mmdc-absent");
-
-    QProcess p;
-    p.start(m_exe, { QStringLiteral("--version") });
-    if (p.waitForFinished(10000) && p.exitCode() == 0) {
-        const QString v = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
-        m_versionCache = QStringLiteral("mmdc-") + (v.isEmpty() ? QStringLiteral("unknown") : v);
-    } else {
-        m_versionCache = QStringLiteral("mmdc-unknown");
+    if (m_versionCache.isEmpty()) {
+        if (m_exe.isEmpty()) {
+            m_versionCache = QStringLiteral("mmdc-absent");
+        } else {
+            QProcess p;
+            p.start(m_exe, { QStringLiteral("--version") });
+            if (p.waitForFinished(10000) && p.exitCode() == 0) {
+                const QString v = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+                m_versionCache =
+                    QStringLiteral("mmdc-") + (v.isEmpty() ? QStringLiteral("unknown") : v);
+            } else {
+                m_versionCache = QStringLiteral("mmdc-unknown");
+            }
+        }
     }
+
+    // 倍率必須進 id（進而進快取 key）：不同倍率的產出像素不同，
+    // 共用同一個快取檔會讓換螢幕後拿到錯誤解析度的圖。
+    if (m_outputExtension == QStringLiteral("png"))
+        return QStringLiteral("%1@%2x").arg(m_versionCache).arg(m_pngScale);
     return m_versionCache;
 }
 
@@ -145,6 +157,9 @@ void MmdcRenderer::start(const QString &source, bool dark, const QString &outPat
         QStringLiteral("-b"), QStringLiteral("transparent"),
         QStringLiteral("-t"), dark ? QStringLiteral("dark") : QStringLiteral("default"),
     };
+    QStringList fullArgs = args;
+    if (m_outputExtension == QStringLiteral("png"))
+        fullArgs << QStringLiteral("-s") << QString::number(m_pngScale);
 
     if (!m_proc) {
         m_proc = new QProcess(this);
@@ -168,7 +183,7 @@ void MmdcRenderer::start(const QString &source, bool dark, const QString &outPat
         });
     }
 
-    m_proc->start(m_exe, args);
+    m_proc->start(m_exe, fullArgs);
     if (!m_proc->waitForStarted(kRenderTimeoutMs)) {
         m_workDir.reset();
         Q_EMIT finished(false, QStringLiteral("mmdc 啟動逾時"));

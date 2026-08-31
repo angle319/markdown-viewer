@@ -24,6 +24,10 @@ public:
     /// 產出的副檔名，"svg" 或 "png"。
     virtual QString outputExtension() const = 0;
 
+    /// 產出的像素相對於邏輯顯示尺寸的倍率。
+    /// PNG 是外部工具以 N 倍光柵化的，顯示時要除回去；SVG 由我們自己光柵化故為 1。
+    virtual qreal outputScale() const { return 1.0; }
+
     /// 啟動一次渲染。同一時間只會有一次進行中的渲染（由 MermaidCache 保證）。
     virtual void start(const QString &source, bool dark, const QString &outPath) = 0;
 

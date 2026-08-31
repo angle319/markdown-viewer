@@ -12,6 +12,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QtMath>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -42,6 +43,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     m_renderer = new MmdcRenderer(this);
+    // 光柵化倍率跟著螢幕：1x 螢幕上用 2 倍等於白花一倍記憶體
+    // （實測 sample.md 的兩張圖就差約 10MB PSS）。
+    m_renderer->setPngScale(qMax(1, qCeil(qApp->devicePixelRatio())));
     m_cache = new MermaidCache(m_renderer, this);
     m_watcher = new FileWatcher(this);
 
@@ -202,8 +206,11 @@ void MainWindow::reparse(bool preserveScroll)
 
     m_doc = MarkdownParser::parse(m_markdown, QFileInfo(m_path).absolutePath(), opt);
     m_backend->setTheme(m_mode);
-    m_backend->setDocument(m_doc);
+
+    // TOC 必須先建好再設定文件：setDocument() 會立刻發出 currentTocIndexChanged，
+    // 若此時 TocPanel 還在舊資料（或稍後才被 setToc 清空），高亮就會被吃掉。
     m_sidebar->toc()->setToc(m_doc.toc);
+    m_backend->setDocument(m_doc);
 
     if (preserveScroll)
         m_backend->setScrollValue(scroll);

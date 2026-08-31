@@ -31,6 +31,9 @@ public:
     bool isCached(const QString &source, bool dark) const;
     bool rendererAvailable() const;
 
+    /// 見 IMermaidRenderer::outputScale()
+    qreal outputScale() const;
+
     /// 已快取或 renderer 不可用時不做事；否則排入佇列。
     /// 重複請求同一個 key 不會排兩次。
     void request(const QString &source, bool dark);

@@ -200,7 +200,10 @@ protected:
                                  : QImage(path);
                 if (!img.isNull()) {
                     if (!logical.isValid() || logical.isEmpty()) {
-                        logical = img.size();
+                        // PNG 是 mmdc 以 N 倍光柵化的，顯示尺寸要除回去
+                        const qreal scale = qMax(qreal(1.0), m_cache->outputScale());
+                        logical = QSize(qRound(img.width() / scale),
+                                        qRound(img.height() / scale));
                         if (logical.width() > contentWidth())
                             logical.scale(contentWidth(), INT_MAX, Qt::KeepAspectRatio);
                     }
@@ -318,6 +321,11 @@ void TextBrowserBackend::render(bool preserveScroll)
     m_view->setMermaidSources(m_doc.mermaid);
     m_view->setPalette(Theme::palette(m_mode));
     m_view->document()->setDefaultStyleSheet(Theme::documentStyleSheet(m_mode));
+
+    // Qt 預設的縮排單位是 40px，巢狀清單與引用區塊在中文字體下會縮得很誇張。
+    // Qt rich-text 不吃 CSS 的 margin-left/padding-left 來調清單縮排，
+    // 唯一有效的旋鈕就是文件層級的 indentWidth。
+    m_view->document()->setIndentWidth(20);
 
     if (!m_doc.baseDir.isEmpty())
         m_view->document()->setBaseUrl(QUrl::fromLocalFile(m_doc.baseDir + QLatin1Char('/')));

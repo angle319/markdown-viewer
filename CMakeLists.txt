@@ -39,18 +39,11 @@ add_library(mdcore STATIC
 target_include_directories(mdcore PUBLIC src)
 target_link_libraries(mdcore PUBLIC Qt6::Core md4c)
 
-# ---- tests ----
-enable_testing()
-foreach(t markdownparser codehighlighter mermaidcache)
-    add_executable(test_${t} tests/test_${t}.cpp)
-    target_link_libraries(test_${t} PRIVATE mdcore Qt6::Test)
-    add_test(NAME ${t} COMMAND test_${t})
-endforeach()
-
-# ---- GUI app (需要 Qt6 Gui/Widgets/Svg) ----
+# ---- gui: 抽成 library 讓 e2e 測試也能連結 ----
 if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
-    add_executable(markdown-tool
-        src/main.cpp
+    set(MD_GUI_AVAILABLE TRUE)
+
+    add_library(mdgui STATIC
         src/MainWindow.cpp
         src/Sidebar.cpp
         src/TocPanel.cpp
@@ -59,9 +52,47 @@ if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
         src/render/IRenderBackend.cpp
         src/render/TextBrowserBackend.cpp
     )
-    target_link_libraries(markdown-tool PRIVATE mdcore Qt6::Widgets Qt6::Svg)
+    target_include_directories(mdgui PUBLIC src)
+    target_link_libraries(mdgui PUBLIC mdcore Qt6::Widgets Qt6::Svg)
+
+    add_executable(markdown-tool src/main.cpp)
+    target_link_libraries(markdown-tool PRIVATE mdgui)
 else()
+    set(MD_GUI_AVAILABLE FALSE)
     message(WARNING
         "markdown-tool: 找不到 Qt6 Gui/Widgets/Svg, 只建置 core 與測試。\n"
         "  補齊方式: sudo apt install libgl1-mesa-dev libglx-dev libopengl-dev qt6-svg-dev")
+endif()
+
+# ---- tests ----
+enable_testing()
+
+# 純邏輯測試: 只需要 QtCore
+foreach(t markdownparser codehighlighter mermaidcache)
+    add_executable(test_${t} tests/test_${t}.cpp)
+    target_link_libraries(test_${t} PRIVATE mdcore Qt6::Test)
+    add_test(NAME ${t} COMMAND test_${t})
+endforeach()
+
+# 整合測試: 會真的呼叫外部 mmdc, 找不到時自己 skip
+# 這支需要 QtSvg/QtGui: 它要驗「Qt 真的畫得出 mermaid 的文字」
+if(MD_GUI_AVAILABLE)
+    add_executable(test_mmdc_integration tests/test_mmdc_integration.cpp)
+    target_link_libraries(test_mmdc_integration PRIVATE mdcore Qt6::Test Qt6::Gui Qt6::Svg)
+    add_test(NAME mmdc_integration COMMAND test_mmdc_integration)
+    set_tests_properties(mmdc_integration PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+endif()
+
+# e2e: 驅動真正的 MainWindow, 用 offscreen platform 跑
+if(MD_GUI_AVAILABLE)
+    foreach(t e2e_viewer e2e_regression)
+        add_executable(test_${t} tests/test_${t}.cpp)
+        target_link_libraries(test_${t} PRIVATE mdgui Qt6::Test)
+        add_test(NAME ${t} COMMAND test_${t})
+        set_tests_properties(${t} PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+    endforeach()
+    target_compile_definitions(test_e2e_regression PRIVATE
+        SAMPLE_MD="${CMAKE_CURRENT_SOURCE_DIR}/docs/sample.md")
 endif()
