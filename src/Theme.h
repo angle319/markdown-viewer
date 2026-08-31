@@ -66,6 +66,17 @@ public:
 
     static QString name(Mode m);
 
+    /// 正文字級（pt）。明確給值，否則各標題層級與正文的相對大小會隨系統字型漂移。
+    static constexpr qreal BodyPointSize = 11.0;
+
+    /// 標題字級（pt），level 為 1..6。
+    ///
+    /// **刻意不透過 CSS 設定。** Qt 的 HTML 解析器對 h5/h6 會套用自己的
+    /// fontSizeAdjustment，CSS 的 font-size 蓋不掉 —— 實測 H5 會變得比正文還小、
+    /// H6 又比 H5 大，整個階層是壞的。所以字級由 render backend 在
+    /// document tree walk 裡明確設定，這裡是唯一的定義處。
+    static qreal headingPointSize(int level);
+
     // ---- 對比計算（WCAG 2.1）----
 
     /// 相對亮度，0（黑）到 1（白）。

@@ -20,6 +20,9 @@
 #ifndef SAMPLE_MD
 #  error "SAMPLE_MD 未定義（應由 CMake 提供 docs/sample.md 的路徑）"
 #endif
+#ifndef HEADINGS_MD
+#  error "HEADINGS_MD 未定義（應由 CMake 提供 docs/headings.md 的路徑）"
+#endif
 
 /// 回歸測試：拿 docs/sample.md 當語法語料庫，把整條 pipeline 的不變式釘住。
 ///
@@ -61,6 +64,7 @@ private slots:
     void inlineCodeIsVisuallyDistinct();
     void blockquoteMarkerContractHolds();
     void tableUsesHorizontalRulesOnly();
+    void headingSizesFollowThemeScale();
     void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
@@ -517,6 +521,59 @@ void TestE2eRegression::tableUsesHorizontalRulesOnly()
     QVERIFY(lastCell.bottomBorder() >= 1.0);
 }
 
+void TestE2eRegression::headingSizesFollowThemeScale()
+{
+    // 這支測試盯住一個 Qt 的陷阱：QTextFormat::FontSizeAdjustment 只要存在
+    // （即使值是 0），Qt 就完全忽略 FontPointSize，改用「預設字級 × 層級係數」。
+    // 實測 H1 設 23pt 卻畫成 18pt、H5 設 11.5pt 卻畫成 7.2pt —— 比正文還小。
+    // 修法是在 applyHeadingScale() 裡 clearProperty() 掉它（設成 0 沒有用）。
+    QVERIFY2(m_win->openFile(QString::fromUtf8(HEADINGS_MD)), HEADINGS_MD);
+
+    QMap<int, qreal> seen;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        const int level = b.blockFormat().headingLevel();
+        if (level < 1 || level > 6)
+            continue;
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (!f.isValid() || f.charFormat().isImageFormat())
+                continue;
+
+            const QTextCharFormat cf = f.charFormat();
+            const qreal want = Theme::headingPointSize(level);
+
+            QVERIFY2(!cf.hasProperty(QTextFormat::FontSizeAdjustment),
+                     qPrintable(QStringLiteral("H%1 還留著 FontSizeAdjustment，"
+                                               "字級會被 Qt 蓋掉").arg(level)));
+            QVERIFY2(qAbs(cf.font().pointSizeF() - want) < 0.01,
+                     qPrintable(QStringLiteral("H%1 實際字級 %2pt，預期 %3pt（片段: %4）")
+                                    .arg(level).arg(cf.font().pointSizeF()).arg(want)
+                                    .arg(f.text().left(12))));
+            QVERIFY2(cf.font().bold(),
+                     qPrintable(QStringLiteral("H%1 不是粗體").arg(level)));
+            seen.insert(level, cf.font().pointSizeF());
+        }
+    }
+
+    // headings.md 必須真的涵蓋六個層級，否則這支測試等於沒驗
+    for (int level = 1; level <= 6; ++level)
+        QVERIFY2(seen.contains(level),
+                 qPrintable(QStringLiteral("語料裡沒有 H%1").arg(level)));
+
+    // 階層必須是嚴格遞減的，而且最深的一層不能小於正文
+    for (int level = 1; level < 6; ++level)
+        QVERIFY2(seen.value(level) > seen.value(level + 1),
+                 qPrintable(QStringLiteral("H%1 (%2pt) 沒有大於 H%3 (%4pt)")
+                                .arg(level).arg(seen.value(level))
+                                .arg(level + 1).arg(seen.value(level + 1))));
+    QVERIFY2(seen.value(6) >= Theme::BodyPointSize,
+             qPrintable(QStringLiteral("H6 (%1pt) 比正文 (%2pt) 還小")
+                            .arg(seen.value(6)).arg(Theme::BodyPointSize)));
+
+    QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
+}
+
 void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()
 {
     bool found = false;
@@ -603,6 +660,43 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
         QSKIP("未設定 MD_E2E_DUMP，跳過視覺輸出");
 
     QVERIFY(QDir().mkpath(dir));
+
+    // MD_E2E_DOC / MD_E2E_ANCHORS 可以改拍別的文件與別的段落，
+    // 方便針對特定樣式（例如標題層級）重現檢查。
+    const QString altDoc = qEnvironmentVariable("MD_E2E_DOC");
+    const QString altAnchors = qEnvironmentVariable("MD_E2E_ANCHORS");
+    if (!altDoc.isEmpty()) {
+        QVERIFY2(m_win->openFile(altDoc), qPrintable(altDoc));
+
+        const QStringList anchors = altAnchors.isEmpty()
+                                        ? QStringList{ QString() }
+                                        : altAnchors.split(QLatin1Char(','));
+        QAction *white = actionNamed(Theme::name(Theme::Light));
+        QAction *black = actionNamed(Theme::name(Theme::Dark));
+        int n = 1;
+        for (const bool dark : { false, true }) {
+            (dark ? black : white)->trigger();
+            for (const QString &anchor : anchors) {
+                if (anchor.isEmpty())
+                    browser()->verticalScrollBar()->setValue(0);
+                else
+                    browser()->scrollToAnchor(anchor.trimmed());
+                QTest::qWait(150);
+                const QString path = QStringLiteral("%1/%2-%3-%4.png")
+                                         .arg(dir)
+                                         .arg(n++, 2, 10, QLatin1Char('0'))
+                                         .arg(dark ? QStringLiteral("black")
+                                                   : QStringLiteral("white"),
+                                              anchor.isEmpty() ? QStringLiteral("top")
+                                                               : anchor.trimmed());
+                QVERIFY2(m_win->grab().save(path), qPrintable(path));
+                qInfo() << "已存" << path;
+            }
+        }
+        white->trigger();
+        QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
+        return;
+    }
 
     struct Shot {
         QString name;

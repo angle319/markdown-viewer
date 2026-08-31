@@ -431,3 +431,42 @@ Qt 根本不會畫 cell 層級的邊框 —— 這是關鍵那一行。
 邊框與內距改由 `MdTextBrowser::applyTableStyling()` 統一處理，
 解析層只輸出 `<table cellspacing="0">`。
 由 `tableUsesHorizontalRulesOnly()` 盯住整組契約。
+
+## 15. 標題層級（2026-08-31）
+
+新增 `docs/headings.md` 作為視覺語料：H1–H6 各層都有內文，另含「標題緊接標題」
+與「標題內含行內 code 與連結」兩種邊角情況。
+
+### 15.1 Qt 的 FontSizeAdjustment 陷阱
+
+原本用 CSS 設標題字級，實際畫出來的階層是壞的 —— **H5 比正文還小，H6 又比 H5 大**。
+
+量測後找到原因：`QTextFormat::FontSizeAdjustment` 這個屬性**只要存在**（即使值是 0），
+Qt 就完全忽略 `FontPointSize`，改用「預設字級 × 層級係數」。實測值：
+
+| | 設定的 pointSize | adjust | 實際畫出 |
+|---|---|---|---|
+| H1 | 23pt | +3 | 18pt |
+| H2 | 17pt | +2 | 13.5pt |
+| H3 | 14pt | +1 | 10.8pt |
+| H4 | 12.5pt | 0 | 9pt |
+| H5 | 11.5pt | -1 | **7.2pt** |
+| H6 | 11pt | 無 | 11pt ✓ |
+
+只有 H6 沒有那個屬性，所以只有它正確。順帶推翻了中途一個錯誤假設 ——
+我一度以為問題是「`h4, h5, h6 { }` 群組選擇器 Qt 套用不完整」，
+分開寫之後 H5 依然是小的，所以那不是原因。
+
+修法：在 `applyHeadingScale()` 裡 `clearProperty(QTextFormat::FontSizeAdjustment)`
+再設字級。**設成 0 沒有用，必須清掉。** 且要用 `setCharFormat`（從既有格式複製後
+修改）而非 `mergeCharFormat` —— merge 無法移除屬性。
+
+字級定義集中在 `Theme::headingPointSize()`：23 / 17 / 14 / 12.5 / 11.5 / 11pt，
+正文 11pt，H6 另外用次要色以便與正文區分。
+`headingSizesFollowThemeScale()` 驗證實際 `font().pointSizeF()`、粗體、
+「六個層級都出現在語料裡」、「階層嚴格遞減」、「H6 不得小於正文」。
+
+### 15.2 截圖工具的可指定文件
+
+`dumpScreenshotsIfRequested()` 新增 `MD_E2E_DOC` 與 `MD_E2E_ANCHORS` 兩個環境變數，
+可以針對任意文件與段落產生兩個主題的截圖。標題層級這一輪就是靠它反覆重現檢查的。

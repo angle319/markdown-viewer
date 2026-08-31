@@ -88,10 +88,19 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 | 引用區塊 | 左側 4px 色條（自繪），連續段落合併成一條 |
 | 表格 | 只有橫線（`borderCollapse` + 每列上框線）、表頭下方加粗、`cellPadding=8` |
 | 巢狀清單 | `setIndentWidth(20)` |
+| 標題字級 | H1→H6 為 23/17/14/12.5/11.5/11pt，正文 11pt；H6 用次要色 |
 
 行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
 「這是程式碼」還是「這是可點的連結」。另外區分也不只靠顏色：連結有底線、
 行內 code 有 chip 與等寬字。
+
+**標題字級不是用 CSS 設的。** `QTextFormat::FontSizeAdjustment` 這個屬性只要存在
+（即使值是 0），Qt 就完全忽略 `FontPointSize`，改用「預設字級 × 層級係數」——
+實測 H1 設 23pt 卻畫成 18pt、**H5 設 11.5pt 卻畫成 7.2pt，比正文還小**。
+修法是在 `applyHeadingScale()` 裡 `clearProperty()` 掉它（設成 0 沒有用），
+再明確指定字級。`Theme::headingPointSize()` 是唯一定義處，由
+`headingSizesFollowThemeScale()` 盯住（含「階層必須嚴格遞減」與
+「H6 不得小於正文」）。
 
 **標題分隔線與引用色條是自繪的**，因為 Qt rich-text 不支援 block 層級的
 `border-bottom` / `border-left`。`MdTextBrowser::paintEvent()` 在文字畫完後補上，
@@ -125,7 +134,8 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 隱形的分頁標籤與隱形選單列。現在 role 設滿，並由
 `paletteHasNoDefaultLightRolesInBlackTheme()` 盯住。
 
-`docs/sample.md` 涵蓋所有 v0.1 該處理的語法，用來手動驗收。
+`docs/sample.md` 涵蓋所有 v0.1 該處理的語法，`docs/headings.md` 專門涵蓋
+H1–H6 的層級（含標題緊接標題、標題內含行內樣式），兩份都用來手動驗收。
 
 ## 記憶體
 
@@ -148,7 +158,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-101 個測試函式、7 個套件：
+102 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -158,7 +168,7 @@ ctest --test-dir build --output-on-failure
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
-| e2e_regression | 23 | 以 sample.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_regression | 24 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。
@@ -167,6 +177,14 @@ e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在�
 
 ```
 MD_E2E_DUMP=/tmp/shots QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
+```
+
+也可以指定別的文件與段落，方便針對特定樣式重現檢查：
+
+```
+MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
+  MD_E2E_ANCHORS=h1-文件標題,h2-混合內容 \
+  QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
 ```
 
 會輸出白／黑兩個主題下的頂端、程式碼、mermaid、表格、對比保護章節共 10 張 PNG。

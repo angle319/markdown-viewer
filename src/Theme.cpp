@@ -44,10 +44,27 @@ QString Theme::name(Mode m)
     return m == Dark ? QStringLiteral("黑色主題") : QStringLiteral("白色主題");
 }
 
+qreal Theme::headingPointSize(int level)
+{
+    switch (level) {
+    case 1:  return 23.0;
+    case 2:  return 17.0;
+    case 3:  return 14.0;
+    case 4:  return 12.5;
+    case 5:  return 11.5;
+    case 6:  return 11.0;
+    default: return BodyPointSize;
+    }
+}
+
 QString Theme::documentStyleSheet(Mode m)
 {
     const Colors &c = colors(m);
 
+    // 標題的 font-size **不在這裡設**，見 Theme::headingPointSize()：
+    // Qt 對 h5/h6 會套用自己的 fontSizeAdjustment，CSS 蓋不掉。
+    // 這裡只留 margin 與顏色（那些 Qt 有正確套用）。
+    //
     // 只用 Qt rich-text 支援的 CSS 屬性子集：color、background-color、
     // font-*、margin、padding、text-decoration、以及表格的 background-color。
     // flex / grid / max-width / border-left 都不支援 —— 欄寬靠 viewport margin，
@@ -57,11 +74,13 @@ QString Theme::documentStyleSheet(Mode m)
     // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
     // （例如 %4）就會讓其後全部錯位 —— 這個坑真的踩過，害 code 的底色拿到前景色。
     QString css = QStringLiteral(R"(
-        body { color: @TEXT@; background-color: @BG@; }
-        h1 { font-size: 23pt; margin-top: 24px; margin-bottom: 10px; color: @TEXT@; }
-        h2 { font-size: 17pt; margin-top: 26px; margin-bottom: 10px; color: @TEXT@; }
-        h3 { font-size: 14pt; margin-top: 22px; margin-bottom: 6px; color: @TEXT@; }
-        h4, h5, h6 { font-size: 12pt; margin-top: 18px; margin-bottom: 6px; color: @TEXT@; }
+        body { color: @TEXT@; background-color: @BG@; font-size: @BODYPT@pt; }
+        h1 { margin-top: 24px; margin-bottom: 12px; color: @TEXT@; }
+        h2 { margin-top: 28px; margin-bottom: 12px; color: @TEXT@; }
+        h3 { margin-top: 24px; margin-bottom: 8px; color: @TEXT@; }
+        h4 { margin-top: 20px; margin-bottom: 6px; color: @TEXT@; }
+        h5 { margin-top: 18px; margin-bottom: 6px; color: @TEXT@; }
+        h6 { margin-top: 18px; margin-bottom: 6px; color: @MUTED@; }
         p  { margin-top: 7px; margin-bottom: 7px; }
         a  { color: @LINK@; text-decoration: underline; }
         code { color: @CODE_FG@; background-color: @CODE_BG@; font-family: monospace; }
@@ -81,6 +100,7 @@ QString Theme::documentStyleSheet(Mode m)
         { QStringLiteral("@CODE_FG@"), c.codeInline },
         { QStringLiteral("@CODE_BG@"), c.codeInlineBackground },
         { QStringLiteral("@BQ@"), QString::number(BlockquoteIndentPx) },
+        { QStringLiteral("@BODYPT@"), QString::number(BodyPointSize) },
     };
     for (const auto &t : tokens)
         css.replace(t.first, t.second);

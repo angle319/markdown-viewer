@@ -95,5 +95,6 @@ if(MD_GUI_AVAILABLE)
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
     endforeach()
     target_compile_definitions(test_e2e_regression PRIVATE
-        SAMPLE_MD="${CMAKE_CURRENT_SOURCE_DIR}/docs/sample.md")
+        SAMPLE_MD="${CMAKE_CURRENT_SOURCE_DIR}/docs/sample.md"
+        HEADINGS_MD="${CMAKE_CURRENT_SOURCE_DIR}/docs/headings.md")
 endif()

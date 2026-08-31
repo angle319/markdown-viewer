@@ -15,6 +15,7 @@
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QFont>
 #include <QTextFrame>
 #include <QTextImageFormat>
 #include <QTextTable>
@@ -268,6 +269,59 @@ public:
                 cur.removeSelectedText();
                 cur.insertText(fx.missingLabel, plain);
             }
+        }
+    }
+
+    /// 明確設定每個標題層級的字級。
+    ///
+    /// Qt 的 HTML 解析器對 h5/h6 會套用自己的 fontSizeAdjustment，
+    /// stylesheet 裡的 font-size 蓋不掉 —— 實測 H5 會比正文還小、H6 又比 H5 大。
+    /// 所以字級改在這裡設，Theme::headingPointSize() 是唯一定義處。
+    void applyHeadingScale()
+    {
+        const Theme::Colors &c = Theme::colors(mode());
+
+        struct Fix {
+            int start;
+            int end;
+            QTextCharFormat fmt;
+        };
+        QVector<Fix> fixes;
+
+        QTextDocument *doc = document();
+        for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+            const int level = b.blockFormat().headingLevel();
+            if (level < 1 || level > 6)
+                continue;
+
+            for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+                const QTextFragment f = it.fragment();
+                if (!f.isValid() || f.charFormat().isImageFormat())
+                    continue;
+
+                // 從既有格式出發，只動需要動的，其餘（字族、行內 code 的底色…）保留
+                QTextCharFormat fmt = f.charFormat();
+
+                // 關鍵：這個屬性只要存在（即使是 0），Qt 就完全忽略 FontPointSize，
+                // 改用「預設字級 × 層級係數」。實測 H1 設 23pt 卻畫成 18pt、
+                // H5 設 11.5pt 卻畫成 7.2pt。必須清掉，設成 0 沒有用。
+                fmt.clearProperty(QTextFormat::FontSizeAdjustment);
+                fmt.setFontPointSize(Theme::headingPointSize(level));
+                fmt.setFontWeight(QFont::Bold);
+                if (level == 6)
+                    fmt.setForeground(QColor(c.muted));
+
+                fixes.append({ f.position(), f.position() + f.length(), fmt });
+            }
+        }
+
+        for (int i = fixes.size() - 1; i >= 0; --i) {
+            const Fix &fx = fixes.at(i);
+            QTextCursor cur(doc);
+            cur.setPosition(fx.start);
+            cur.setPosition(fx.end, QTextCursor::KeepAnchor);
+            // setCharFormat 而非 merge：merge 無法「移除」屬性
+            cur.setCharFormat(fx.fmt);
         }
     }
 
@@ -598,6 +652,7 @@ void TextBrowserBackend::render(bool preserveScroll)
 
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyHeadingScale();
     m_view->applyTableStyling();
     m_view->applyContrastFixups();
 
@@ -636,6 +691,7 @@ void TextBrowserBackend::mermaidReady(const QString &key)
     m_view->setMermaidSources(m_doc.mermaid);
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyHeadingScale();
     m_view->applyTableStyling();
     m_view->applyContrastFixups();
     setScrollValue(scroll);
