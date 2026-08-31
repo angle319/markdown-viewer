@@ -31,13 +31,16 @@ set_target_properties(md4c PROPERTIES AUTOMOC OFF)
 add_library(mdcore STATIC
     src/core/MarkdownParser.cpp
     src/core/CodeHighlighter.cpp
+    src/core/IMermaidRenderer.cpp
+    src/core/MermaidCache.cpp
+    src/core/MmdcRenderer.cpp
 )
 target_include_directories(mdcore PUBLIC src)
 target_link_libraries(mdcore PUBLIC Qt6::Core md4c)
 
 # ---- tests ----
 enable_testing()
-foreach(t markdownparser)
+foreach(t markdownparser codehighlighter mermaidcache)
     add_executable(test_${t} tests/test_${t}.cpp)
     target_link_libraries(test_${t} PRIVATE mdcore Qt6::Test)
     add_test(NAME ${t} COMMAND test_${t})
