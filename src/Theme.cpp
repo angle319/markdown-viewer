@@ -7,12 +7,12 @@ const Theme::Colors &Theme::colors(Mode m)
     static const Colors light{
         QStringLiteral("#ffffff"), QStringLiteral("#24292f"), QStringLiteral("#57606a"),
         QStringLiteral("#0969da"), QStringLiteral("#f6f8fa"), QStringLiteral("#d0d7de"),
-        QStringLiteral("#d0d7de"), QStringLiteral("#f6f8fa"),
+        QStringLiteral("#f6f8fa"),
     };
     static const Colors dark{
         QStringLiteral("#1f2430"), QStringLiteral("#d7dae0"), QStringLiteral("#8b949e"),
         QStringLiteral("#6cb6ff"), QStringLiteral("#161b22"), QStringLiteral("#30363d"),
-        QStringLiteral("#30363d"), QStringLiteral("#22272e"),
+        QStringLiteral("#22272e"),
     };
     return m == Dark ? dark : light;
 }

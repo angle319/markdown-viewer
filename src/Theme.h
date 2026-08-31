@@ -21,7 +21,8 @@ public:
         QString link;
         QString codeBackground;
         QString border;
-        QString quoteBar;
+        // 註：引用區塊沒有左側色條 —— Qt rich-text 不支援 border-left，
+        // 只能靠縮排表現，所以這裡刻意沒有 quoteBar 這種欄位。
         QString tableHeader;
     };
 
