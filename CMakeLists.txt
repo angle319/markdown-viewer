@@ -34,6 +34,7 @@ add_library(mdcore STATIC
     src/core/IMermaidRenderer.cpp
     src/core/MermaidCache.cpp
     src/core/MmdcRenderer.cpp
+    src/core/FileWatcher.cpp
 )
 target_include_directories(mdcore PUBLIC src)
 target_link_libraries(mdcore PUBLIC Qt6::Core md4c)
@@ -48,7 +49,17 @@ endforeach()
 
 # ---- GUI app (需要 Qt6 Gui/Widgets/Svg) ----
 if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
-    message(STATUS "markdown-tool: GUI 依賴齊備, 會建置 app")
+    add_executable(markdown-tool
+        src/main.cpp
+        src/MainWindow.cpp
+        src/Sidebar.cpp
+        src/TocPanel.cpp
+        src/FileBrowserPanel.cpp
+        src/Theme.cpp
+        src/render/IRenderBackend.cpp
+        src/render/TextBrowserBackend.cpp
+    )
+    target_link_libraries(markdown-tool PRIVATE mdcore Qt6::Widgets Qt6::Svg)
 else()
     message(WARNING
         "markdown-tool: 找不到 Qt6 Gui/Widgets/Svg, 只建置 core 與測試。\n"
