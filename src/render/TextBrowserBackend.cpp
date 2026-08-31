@@ -15,7 +15,10 @@
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextFrame>
 #include <QTextImageFormat>
+#include <QTextTable>
+#include <QTextTableCell>
 
 namespace {
 
@@ -264,6 +267,57 @@ public:
                 plain.setFontItalic(true);
                 cur.removeSelectedText();
                 cur.insertText(fx.missingLabel, plain);
+            }
+        }
+    }
+
+    /// 表格改成「只有橫線」的樣式（對照 Chrome extension 的觀感）。
+    ///
+    /// 用 Qt 原生能力而不是自繪：QTextTableFormat::setBorderCollapse(true) 之後
+    /// Qt 會渲染每個 cell 自己的邊框，所以把整體 border 設為 0、只給每列上框線
+    /// 就得到橫線樣式。表頭那一列再加一條較粗的下框線。
+    void applyTableStyling()
+    {
+        const Theme::Colors &c = Theme::colors(mode());
+        const QBrush rule(QColor(c.border));
+
+        QTextDocument *doc = document();
+        for (QTextFrame *frame : doc->rootFrame()->childFrames()) {
+            auto *table = qobject_cast<QTextTable *>(frame);
+            if (!table)
+                continue;
+
+            QTextTableFormat tf = table->format();
+            tf.setBorder(0);
+            tf.setBorderCollapse(true);   // 少了這行 Qt 不會畫 cell 層級的邊框
+            tf.setCellSpacing(0);
+            tf.setCellPadding(8);
+            tf.setBorderBrush(rule);
+            table->setFormat(tf);
+
+            const int rows = table->rows();
+            const int cols = table->columns();
+            for (int r = 0; r < rows; ++r) {
+                for (int col = 0; col < cols; ++col) {
+                    QTextTableCell cell = table->cellAt(r, col);
+                    if (!cell.isValid())
+                        continue;
+                    QTextTableCellFormat cf = cell.format().toTableCellFormat();
+
+                    cf.setTopBorder(r == 0 ? 0 : 1);
+                    cf.setTopBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+                    cf.setTopBorderBrush(rule);
+
+                    // 表頭下方那條線畫粗一點，把標題列分出來
+                    const bool headerBottom = (r == 0 && rows > 1);
+                    cf.setBottomBorder(headerBottom ? 2 : (r == rows - 1 ? 1 : 0));
+                    cf.setBottomBorderStyle(QTextFrameFormat::BorderStyle_Solid);
+                    cf.setBottomBorderBrush(rule);
+
+                    cf.setLeftBorder(0);
+                    cf.setRightBorder(0);
+                    cell.setFormat(cf);
+                }
             }
         }
     }
@@ -544,6 +598,7 @@ void TextBrowserBackend::render(bool preserveScroll)
 
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyTableStyling();
     m_view->applyContrastFixups();
 
     if (m_zoomSteps != 0) {
@@ -581,6 +636,7 @@ void TextBrowserBackend::mermaidReady(const QString &key)
     m_view->setMermaidSources(m_doc.mermaid);
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyTableStyling();
     m_view->applyContrastFixups();
     setScrollValue(scroll);
 }

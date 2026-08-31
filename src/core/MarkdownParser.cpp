@@ -168,7 +168,8 @@ int enterBlock(MD_BLOCKTYPE type, void *detail, void *ud)
         r->html += QLatin1String("<hr>");
         break;
     case MD_BLOCK_TABLE:
-        r->html += QLatin1String("<table border=\"1\" cellspacing=\"0\" cellpadding=\"8\">");
+        // 邊框與內距由 render backend 的 applyTableStyling() 統一處理（只有橫線）
+        r->html += QLatin1String("<table cellspacing=\"0\">");
         break;
     case MD_BLOCK_THEAD:
         r->html += QLatin1String("<thead>");

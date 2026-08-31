@@ -86,7 +86,7 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 | 連結 | 連結色 + **底線**（不只靠顏色區分） |
 | H1 / H2 | 底部 1px 分隔線（自繪，見下） |
 | 引用區塊 | 左側 4px 色條（自繪），連續段落合併成一條 |
-| 表格 | `cellpadding=8` |
+| 表格 | 只有橫線（`borderCollapse` + 每列上框線）、表頭下方加粗、`cellPadding=8` |
 | 巢狀清單 | `setIndentWidth(20)` |
 
 行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
@@ -148,7 +148,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-100 個測試函式、7 個套件：
+101 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -158,7 +158,7 @@ ctest --test-dir build --output-on-failure
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
-| e2e_regression | 22 | 以 sample.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_regression | 23 | 以 sample.md 為語料庫釘住 pipeline 不變式與樣式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。
@@ -169,7 +169,7 @@ e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在�
 MD_E2E_DUMP=/tmp/shots QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
 ```
 
-會輸出白／黑兩個主題下的頂端、程式碼、mermaid、對比保護章節共 8 張 PNG。
+會輸出白／黑兩個主題下的頂端、程式碼、mermaid、表格、對比保護章節共 10 張 PNG。
 
 ## 狀態
 

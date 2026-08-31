@@ -419,3 +419,15 @@ WCAG 對比比只衡量**亮度**差異，對「兩個顏色是否看得出不�
 | `docs/sample.md` | 39.0 MB | 82.0 MB |
 
 樣式改動不影響記憶體。測試成長為 **7 個套件、100 個測試函式**，全數通過。
+
+### 14.7 表格改為只有橫線
+
+原本用 `<table border="1">` 畫完整格線，改成對照 extension 的橫線樣式。
+**用 Qt 原生能力而非自繪**：`QTextTableFormat::setBorderCollapse(true)` 之後
+Qt 會渲染每個 cell 自己的邊框，所以把整體 `border` 設為 0、只給每列上框線即可；
+表頭那一列的下框線加粗到 2px 把標題列分出來。少了 `setBorderCollapse(true)`
+Qt 根本不會畫 cell 層級的邊框 —— 這是關鍵那一行。
+
+邊框與內距改由 `MdTextBrowser::applyTableStyling()` 統一處理，
+解析層只輸出 `<table cellspacing="0">`。
+由 `tableUsesHorizontalRulesOnly()` 盯住整組契約。

@@ -10,6 +10,7 @@
 #include <QTextDocument>
 #include <QTextFrame>
 #include <QTextTable>
+#include <QTextTableCell>
 #include <QTreeWidget>
 
 #include "MainWindow.h"
@@ -59,6 +60,7 @@ private slots:
     void reloadPreservesStructure();
     void inlineCodeIsVisuallyDistinct();
     void blockquoteMarkerContractHolds();
+    void tableUsesHorizontalRulesOnly();
     void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
@@ -472,6 +474,49 @@ void TestE2eRegression::blockquoteMarkerContractHolds()
     QCOMPARE(quoteBlocks, 2);   // sample.md 的引用區塊有兩段
 }
 
+void TestE2eRegression::tableUsesHorizontalRulesOnly()
+{
+    // 表格改成只有橫線（對照 Chrome extension 的觀感）。
+    // 用 Qt 原生的 borderCollapse + 每個 cell 的邊框，不是自繪 ——
+    // 少了 borderCollapse(true) 這行 Qt 根本不會畫 cell 層級的邊框。
+    QTextTable *table = nullptr;
+    for (QTextFrame *child : browser()->document()->rootFrame()->childFrames())
+        if (auto *t = qobject_cast<QTextTable *>(child))
+            table = t;
+    QVERIFY(table);
+
+    const QTextTableFormat tf = table->format();
+    QCOMPARE(tf.border(), qreal(0));            // 整體外框不畫
+    QVERIFY2(tf.borderCollapse(), "沒開 borderCollapse，cell 邊框不會被渲染");
+    QCOMPARE(tf.cellPadding(), qreal(8));
+    QCOMPARE(tf.cellSpacing(), qreal(0));
+
+    const int rows = table->rows();
+    QVERIFY(rows >= 2);
+
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < table->columns(); ++c) {
+            const QTextTableCellFormat cf = table->cellAt(r, c).format().toTableCellFormat();
+            QVERIFY2(qFuzzyIsNull(cf.leftBorder()),
+                     qPrintable(QStringLiteral("(%1,%2) 有左框線").arg(r).arg(c)));
+            QVERIFY2(qFuzzyIsNull(cf.rightBorder()),
+                     qPrintable(QStringLiteral("(%1,%2) 有右框線").arg(r).arg(c)));
+
+            if (r == 0) {
+                QCOMPARE(cf.topBorder(), qreal(0));      // 表頭上方不畫
+                QVERIFY2(cf.bottomBorder() >= 2.0, "表頭下方的分隔線不夠明顯");
+            } else {
+                QCOMPARE(cf.topBorder(), qreal(1));
+            }
+        }
+    }
+
+    // 最後一列要有下框線把表格收尾
+    const QTextTableCellFormat lastCell =
+        table->cellAt(rows - 1, 0).format().toTableCellFormat();
+    QVERIFY(lastCell.bottomBorder() >= 1.0);
+}
+
 void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()
 {
     bool found = false;
@@ -568,11 +613,13 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
         { QStringLiteral("01-top-white"),      QString(),                false },
         { QStringLiteral("02-code-white"),     QStringLiteral("程式碼"),  false },
         { QStringLiteral("03-mermaid-white"),  QStringLiteral("mermaid"), false },
-        { QStringLiteral("04-contrast-white"), QStringLiteral("對比保護"), false },
-        { QStringLiteral("05-top-black"),      QString(),                true  },
-        { QStringLiteral("06-code-black"),     QStringLiteral("程式碼"),  true  },
-        { QStringLiteral("07-mermaid-black"),  QStringLiteral("mermaid"), true  },
-        { QStringLiteral("08-contrast-black"), QStringLiteral("對比保護"), true  },
+        { QStringLiteral("04-table-white"),    QStringLiteral("表格"),     false },
+        { QStringLiteral("05-contrast-white"), QStringLiteral("對比保護"), false },
+        { QStringLiteral("06-top-black"),      QString(),                true  },
+        { QStringLiteral("07-code-black"),     QStringLiteral("程式碼"),  true  },
+        { QStringLiteral("08-mermaid-black"),  QStringLiteral("mermaid"), true  },
+        { QStringLiteral("09-table-black"),    QStringLiteral("表格"),     true  },
+        { QStringLiteral("10-contrast-black"), QStringLiteral("對比保護"), true  },
     };
 
     for (const Shot &sh : shots) {
