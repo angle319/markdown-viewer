@@ -3,6 +3,8 @@
 #include "core/MermaidCache.h"
 
 #include <QFileInfo>
+#include <QAbstractTextDocumentLayout>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
 
@@ -279,6 +281,104 @@ public:
     }
 
 protected:
+    /// Qt rich-text 不支援 block 層級的 border，所以「標題底下的分隔線」與
+    /// 「引用區塊左側色條」只能自己畫。
+    ///
+    /// 引用區塊的辨識靠 blockFormat().leftMargin() == Theme::BlockquoteIndentPx
+    /// —— 那個值由 Theme 的 CSS 設定，是兩邊共用的契約（清單項目有 textList、
+    /// 標題的 leftMargin 是 0，所以不會誤判）。
+    void paintEvent(QPaintEvent *event) override
+    {
+        QTextBrowser::paintEvent(event);
+
+        QTextDocument *doc = document();
+        QAbstractTextDocumentLayout *layout = doc->documentLayout();
+        if (!layout)
+            return;
+
+        const Theme::Colors &c = Theme::colors(mode());
+        const QColor rule(c.border);
+        const qreal margin = doc->documentMargin();
+        const qreal dy = verticalScrollBar()->value();
+        const qreal dx = horizontalScrollBar()->value();
+        const QRectF clip = QRectF(event->rect()).adjusted(-2, -8, 2, 8);
+
+        QPainter p(viewport());
+        p.setRenderHint(QPainter::Antialiasing);
+
+        // 從第一個可見的 block 開始，別每次重繪都掃全文件
+        const int firstPos = layout->hitTest(QPointF(margin, dy), Qt::FuzzyHit);
+        QTextBlock b = firstPos >= 0 ? doc->findBlock(firstPos) : doc->begin();
+        if (!b.isValid())
+            b = doc->begin();
+
+        // 若第一個可見 block 位於引用區塊中間，要往回走到該段的起點，
+        // 否則色條會從畫面上緣被切掉一截。
+        while (b.isValid() && isBlockquote(b)) {
+            const QTextBlock prev = b.previous();
+            if (!prev.isValid() || !isBlockquote(prev))
+                break;
+            b = prev;
+        }
+
+        const qreal contentRight = qMax(margin + 40.0, viewport()->width() - margin);
+
+        while (b.isValid()) {
+            const QRectF r = layout->blockBoundingRect(b).translated(-dx, -dy);
+            if (r.top() > clip.bottom())
+                break;
+
+            const QTextBlockFormat bf = b.blockFormat();
+
+            // 標題分隔線：只有 H1 / H2，跟一般閱讀習慣一致
+            const int level = bf.headingLevel();
+            if ((level == 1 || level == 2) && !b.text().trimmed().isEmpty()) {
+                if (r.bottom() >= clip.top()) {
+                    p.setPen(QPen(rule, 1));
+                    const qreal y = qRound(r.bottom() - 3.0) + 0.5;
+                    p.drawLine(QPointF(margin, y), QPointF(contentRight, y));
+                }
+                b = b.next();
+                continue;
+            }
+
+            // 引用區塊左色條：把連續的引用 block 併成一條，
+            // 否則多段引用會畫成好幾截斷掉的短棒。
+            if (isBlockquote(b)) {
+                QRectF span = r;
+                QTextBlock last = b;
+                for (QTextBlock n = b.next(); n.isValid() && isBlockquote(n); n = n.next()) {
+                    span = span.united(layout->blockBoundingRect(n).translated(-dx, -dy));
+                    last = n;
+                }
+                if (span.bottom() >= clip.top() && span.top() <= clip.bottom()) {
+                    p.setPen(Qt::NoPen);
+                    p.setBrush(rule);
+                    const QRectF bar(margin + 2.0, span.top() + 2.0,
+                                     qreal(Theme::BlockquoteBarPx),
+                                     qMax(6.0, span.height() - 4.0));
+                    p.drawRoundedRect(bar, Theme::BlockquoteBarPx / 2.0,
+                                      Theme::BlockquoteBarPx / 2.0);
+                }
+                b = last.next();
+                continue;
+            }
+
+            b = b.next();
+        }
+    }
+
+    /// 引用區塊的辨識：leftMargin 等於 Theme 的契約值，且不是清單項目。
+    static bool isBlockquote(const QTextBlock &b)
+    {
+        if (!b.isValid() || b.textList())
+            return false;
+        const QTextBlockFormat bf = b.blockFormat();
+        if (bf.headingLevel() > 0)
+            return false;
+        return qFuzzyCompare(bf.leftMargin() + 1.0, qreal(Theme::BlockquoteIndentPx) + 1.0);
+    }
+
     QVariant loadResource(int type, const QUrl &name) override
     {
         if (type != int(QTextDocument::ImageResource))

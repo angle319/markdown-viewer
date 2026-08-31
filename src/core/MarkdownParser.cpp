@@ -168,7 +168,7 @@ int enterBlock(MD_BLOCKTYPE type, void *detail, void *ud)
         r->html += QLatin1String("<hr>");
         break;
     case MD_BLOCK_TABLE:
-        r->html += QLatin1String("<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">");
+        r->html += QLatin1String("<table border=\"1\" cellspacing=\"0\" cellpadding=\"8\">");
         break;
     case MD_BLOCK_THEAD:
         r->html += QLatin1String("<thead>");

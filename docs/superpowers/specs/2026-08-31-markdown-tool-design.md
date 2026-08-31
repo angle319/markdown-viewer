@@ -340,3 +340,82 @@ e2e 以 `QT_QPA_PLATFORM=offscreen` 執行，不需要 X／Wayland。
 路徑列的 `QFileSystemModel` 與 `QCompleter` 約增加 0.7MB，仍在 40MB 目標內。
 
 測試成長為 **7 個套件、95 個測試函式**，全數通過。
+
+## 14. 第三輪：對照 Chrome extension 調整排版（2026-08-31）
+
+### 14.1 取得基準的方法
+
+沒有靠目測。用本機 HTTP 伺服器把同一份 `docs/sample.md` 餵給使用者 Chrome 裡的
+「Markdown Reader」extension（它的 content script 也匹配 `*://*/*.md`），
+再用 `getComputedStyle` 把實際數值抓出來。
+
+過程中兩個小絆腳石：瀏覽器工具不允許導向 `file://`，所以改用 HTTP；
+Python 的 `http.server` 不會為 `.md` 送 charset，Chrome 以 latin-1 解碼變成亂碼，
+需要自己覆寫 `guess_type()` 回 `text/markdown; charset=utf-8`。
+
+抓到的關鍵值：行內 `code` 是 `rgb(103,133,224)` 配 `rgba(103,133,224,0.1)` 底、
+圓角 6px；`h2` 有 1px `rgb(48,54,61)` 的底線、`margin-top:35px`；
+`blockquote` 有 4px 左色條；連結有底線且與行內 code **同色**。
+
+### 14.2 採納與刻意不採納
+
+採納：行內 code 的顏色 + 底色 chip、連結底線、H1/H2 分隔線、引用左色條、
+表格內距加大。
+
+**刻意不採納 extension 讓行內 code 與連結同色。** 那樣讀者分不出「這是程式碼」
+還是「這是可點的連結」。改成色相差 > 110° 的洋紅系，且區分不只靠顏色 ——
+連結有底線、行內 code 有 chip 與等寬字，色覺不同的人也分得出來。
+
+### 14.3 自繪：標題分隔線與引用色條
+
+Qt rich-text 不支援 block 層級的 `border-bottom` / `border-left`，只能自己畫。
+`MdTextBrowser::paintEvent()` 在 `QTextBrowser::paintEvent()` 之後補上，
+用 `documentLayout()->hitTest()` 找到第一個可見 block 才開始掃，不是每次重繪都
+掃全文件。
+
+引用區塊的辨識是個明確契約：`blockFormat().leftMargin()` 等於
+`Theme::BlockquoteIndentPx`，該常數同時被 CSS 與繪製程式碼使用。
+探測 Qt 實際留下的 block 屬性後確認可行 —— 清單項目有 `textList()`、
+標題的 `leftMargin` 是 0，都不會誤判。由 `blockquoteMarkerContractHolds()` 盯住。
+
+連續的引用 block 會先併成一個 union rect 再畫一條，否則多段引用會變成好幾截
+斷開的短棒。若第一個可見 block 落在引用段中間，會往回走到該段起點，
+避免色條從畫面上緣被切掉。
+
+### 14.4 又一個被寬鬆斷言掩蓋的 bug
+
+改 CSS 時把 `%4` 拿掉了（`codeBackground` 不再由 stylesheet 使用），
+於是字串裡的 placeholder 只剩 8 個而我傳了 9 個引數。
+
+**`QString::arg` 的多引數版本是按「字串中出現的 placeholder 由小到大」依序取代，
+不是 `%N` 對應第 N 個引數。** 少用掉一個編號會讓其後全部錯位 ——
+結果 `code` 的 `background-color` 拿到了前景色。
+
+而測試當時是綠的：`inlineCodeIsVisuallyDistinct()` 只驗「顏色與正文不同」，
+而對比修正把前景改成了在該底色上可讀的白色，於是斷言通過。是產生的 CSS
+印出來看才發現的。
+
+兩項修正：
+1. stylesheet 改用具名 token（`@TEXT@`、`@CODE_FG@`…）逐一 `replace`，
+   徹底消除位置引數錯位這一類 bug；`styleSheetHasNoLeftoverPlaceholders()`
+   確認取代乾淨、也確認沒人改回位置引數。
+2. 測試改成斷言**確切等於** `Theme::colors(m).codeInline` 與
+   `codeInlineBackground`。寬鬆的斷言會掩蓋 bug。
+
+### 14.5 「可區分」不能用對比比衡量
+
+第一版把「行內 code 與連結要分得出來」寫成 `contrastRatio(fg, link) > 1.2`，
+測試失敗：紫 `#6f42c1` 與藍 `#0b57d0` 的對比比只有 1.13:1。
+
+WCAG 對比比只衡量**亮度**差異，對「兩個顏色是否看得出不同」是錯的工具 ——
+用它當判準會逼人去改亮度而不是改色相。改用色相差（門檻 60°），
+實際選用的兩色相差 118°（白）與 116°（黑）。
+
+### 14.6 數字
+
+| 情境 | PSS | RSS |
+|---|---|---|
+| 三行小檔（基準） | 33.5 MB | 66.4 MB |
+| `docs/sample.md` | 39.0 MB | 82.0 MB |
+
+樣式改動不影響記憶體。測試成長為 **7 個套件、100 個測試函式**，全數通過。

@@ -57,6 +57,9 @@ private slots:
     // --- 狀態切換不破壞不變式 ---
     void themeRoundTripPreservesStructure();
     void reloadPreservesStructure();
+    void inlineCodeIsVisuallyDistinct();
+    void blockquoteMarkerContractHolds();
+    void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
 
@@ -388,6 +391,105 @@ void TestE2eRegression::reloadPreservesStructure()
     QCOMPARE(headingBlockCount(), headings);
     QCOMPARE(tableCount(), tables);
     QCOMPARE(m_win->findChild<QTreeWidget *>()->topLevelItemCount(), 1);
+}
+
+void TestE2eRegression::inlineCodeIsVisuallyDistinct()
+{
+    // 行內 `code` 必須有自己的顏色與底色，跟正文一眼分得出來。
+    for (Theme::Mode m : { Theme::Light, Theme::Dark }) {
+        actionNamed(Theme::name(m))->trigger();
+
+        const QColor pageBg(Theme::colors(m).background);
+        const QColor bodyText(Theme::colors(m).text);
+
+        bool found = false;
+        const QTextDocument *doc = browser()->document();
+        for (QTextBlock b = doc->begin(); b.isValid() && !found; b = b.next()) {
+            for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+                const QTextFragment f = it.fragment();
+                if (!f.isValid() || !f.text().contains(QStringLiteral("inline code")))
+                    continue;
+                found = true;
+                const QTextCharFormat cf = f.charFormat();
+
+                const QStringList fams = cf.fontFamilies().toStringList();
+                QVERIFY2(fams.contains(QStringLiteral("monospace"), Qt::CaseInsensitive),
+                         qPrintable(QStringLiteral("行內 code 不是等寬字: %1")
+                                        .arg(fams.join(QLatin1Char(',')))));
+
+                QVERIFY2(cf.background().style() != Qt::NoBrush,
+                         "行內 code 沒有底色");
+                const QColor bg = cf.background().color();
+                QVERIFY2(Theme::contrastRatio(bg, pageBg) > 1.05,
+                         qPrintable(QStringLiteral("行內 code 底色與頁面底色幾乎一樣: %1 vs %2")
+                                        .arg(bg.name(), pageBg.name())));
+
+                QVERIFY2(cf.foreground().style() != Qt::NoBrush, "行內 code 沒有自己的前景色");
+                const QColor fg = cf.foreground().color();
+                QVERIFY2(fg != bodyText,
+                         qPrintable(QStringLiteral("行內 code 的顏色與正文相同: %1").arg(fg.name())));
+
+                // 斷言「確切等於主題定義的顏色」。原本只驗「與正文不同」，
+                // 結果 CSS placeholder 錯位（底色拿到前景色）時測試照樣通過 ——
+                // 因為對比修正把前景改成了可讀的白色。寬鬆的斷言會掩蓋 bug。
+                QCOMPARE(fg, QColor(Theme::colors(m).codeInline));
+                QCOMPARE(bg, QColor(Theme::colors(m).codeInlineBackground));
+                QVERIFY2(Theme::contrastRatio(fg, bg) >= Theme::MinTextContrast,
+                         qPrintable(QStringLiteral("行內 code 對比不足: %1 on %2 = %3:1")
+                                        .arg(fg.name(), bg.name())
+                                        .arg(Theme::contrastRatio(fg, bg))));
+                qInfo().noquote() << Theme::name(m) << "行內 code: fg" << fg.name()
+                                  << "bg" << bg.name();
+            }
+        }
+        QVERIFY2(found, "找不到行內 code 片段");
+    }
+    actionNamed(Theme::name(Theme::Light))->trigger();
+}
+
+void TestE2eRegression::blockquoteMarkerContractHolds()
+{
+    // Qt rich-text 沒有 block 層級的 border，所以引用區塊的左色條是自繪的，
+    // 而「哪些 block 是引用區塊」靠 leftMargin == Theme::BlockquoteIndentPx 辨識。
+    // 這支測試釘住那個契約：CSS 與繪製程式碼共用同一個常數。
+    int quoteBlocks = 0;
+    int headingBlocks = 0;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        const QTextBlockFormat bf = b.blockFormat();
+        if (bf.headingLevel() > 0) {
+            ++headingBlocks;
+            QCOMPARE(bf.leftMargin(), qreal(0));   // 標題不能被誤判成引用
+            continue;
+        }
+        if (b.textList())
+            continue;                              // 清單項目由 textList 排除
+        if (qFuzzyCompare(bf.leftMargin() + 1.0, qreal(Theme::BlockquoteIndentPx) + 1.0))
+            ++quoteBlocks;
+    }
+
+    QCOMPARE(headingBlocks, m_doc.toc.size());
+    QCOMPARE(quoteBlocks, 2);   // sample.md 的引用區塊有兩段
+}
+
+void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()
+{
+    bool found = false;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid() && !found; b = b.next()) {
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (!f.isValid() || !f.charFormat().isAnchor())
+                continue;
+            if (!f.text().contains(QStringLiteral("外部連結")))
+                continue;
+            found = true;
+            const QTextCharFormat cf = f.charFormat();
+            QVERIFY2(cf.fontUnderline(), "連結沒有底線");
+            QCOMPARE(cf.foreground().color(), QColor(Theme::colors(Theme::Light).link));
+        }
+    }
+    QVERIFY2(found, "找不到外部連結片段");
 }
 
 void TestE2eRegression::everyTextFragmentIsReadableInBothThemes()

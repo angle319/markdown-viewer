@@ -27,6 +27,8 @@ private slots:
 
     void syntaxColoursAreReadable();
 
+    void styleSheetHasNoLeftoverPlaceholders();
+    void inlineCodeColoursAreReadableAndDistinct();
     void paletteRolePairsAreReadable();
     void paletteHasNoDefaultLightRolesInBlackTheme();
 
@@ -188,6 +190,72 @@ void TestTheme::syntaxColoursAreReadable()
         }
     }
     qInfo() << "檢查了" << checked << "組語法高亮顏色";
+}
+
+void TestTheme::styleSheetHasNoLeftoverPlaceholders()
+{
+    // 這支測試盯的是一個真的踩過的坑：QString::arg 的多引數版本按「出現的
+    // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
+    // 就會讓其後全部錯位（當時害 code 的底色拿到了前景色，而且因為對比修正
+    // 把前景改成可讀色，寬鬆的斷言還讓它過關）。現在改用具名 token，
+    // 這裡確認取代乾淨、也確認沒人改回位置引數。
+    for (Theme::Mode m : modes()) {
+        const QString css = Theme::documentStyleSheet(m);
+        QVERIFY2(!css.contains(QLatin1Char('@')),
+                 qPrintable(QStringLiteral("stylesheet 有未取代的 token: %1").arg(css)));
+        QVERIFY2(!css.contains(QRegularExpression(QStringLiteral("%\\d"))),
+                 qPrintable(QStringLiteral("stylesheet 有未取代的位置引數: %1").arg(css)));
+
+        // 每一個顏色都應該真的出現在 CSS 裡
+        const Theme::Colors &c = Theme::colors(m);
+        for (const QString &colour : { c.background, c.text, c.muted, c.link,
+                                       c.codeInline, c.codeInlineBackground,
+                                       c.border, c.tableHeader })
+            QVERIFY2(css.contains(colour),
+                     qPrintable(QStringLiteral("%1 沒出現在 stylesheet 裡").arg(colour)));
+    }
+}
+
+void TestTheme::inlineCodeColoursAreReadableAndDistinct()
+{
+    for (Theme::Mode m : modes()) {
+        const Theme::Colors &c = Theme::colors(m);
+        const QColor fg(c.codeInline);
+        const QColor bg(c.codeInlineBackground);
+        const QColor pageBg(c.background);
+        const QColor link(c.link);
+
+        const double r = Theme::contrastRatio(fg, bg);
+        QVERIFY2(r >= Theme::MinTextContrast,
+                 qPrintable(QStringLiteral("%1 行內 code 對比 %2:1").arg(Theme::name(m)).arg(r)));
+
+        // 底色要看得出是一塊「chip」，但不能搶對比
+        const double chip = Theme::contrastRatio(bg, pageBg);
+        QVERIFY2(chip > 1.05 && chip < 2.0,
+                 qPrintable(QStringLiteral("%1 行內 code 底色與頁面對比 %2:1 不合理")
+                                .arg(Theme::name(m)).arg(chip)));
+
+        // 與連結色要分得出來，否則讀者無法區分「程式碼」與「可點的連結」。
+        //
+        // 判準用**色相差**而不是 WCAG 對比比：對比比只衡量亮度，紫 (#6f42c1) 與
+        // 藍 (#0b57d0) 的對比比只有 1.13:1，卻是明顯不同的顏色。用對比比當判準
+        // 會逼人去改亮度而不是改色相，方向就錯了。
+        const auto hueDelta = [](const QColor &a, const QColor &b) {
+            const int ha = a.hue();
+            const int hb = b.hue();
+            if (ha < 0 || hb < 0)
+                return 180.0;   // 灰階視為完全不同色相
+            const double d = qAbs(double(ha) - double(hb));
+            return qMin(d, 360.0 - d);
+        };
+        const double dHue = hueDelta(fg, link);
+        QVERIFY2(fg != link && dHue >= 60.0,
+                 qPrintable(QStringLiteral("%1 行內 code 與連結的色相只差 %2°（需 ≥60）: %3 vs %4")
+                                .arg(Theme::name(m)).arg(dHue).arg(fg.name(), link.name())));
+
+        // 也要與正文色不同，否則等於沒標注
+        QVERIFY(fg != QColor(c.text));
+    }
 }
 
 void TestTheme::paletteRolePairsAreReadable()

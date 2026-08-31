@@ -20,6 +20,8 @@ const Theme::Colors &Theme::colors(Mode m)
         QStringLiteral("#454545"),   // muted        9.59:1
         QStringLiteral("#0b57d0"),   // link         6.39:1
         QStringLiteral("#f2f2f2"),   // codeBackground
+        QStringLiteral("#8f2d56"),   // codeInline    6.67:1 on #f4eaee, 色相 335°
+        QStringLiteral("#f4eaee"),   // codeInlineBackground
         QStringLiteral("#8c8c8c"),   // border       3.36:1（非文字）
         QStringLiteral("#e8e8e8"),   // tableHeader
     };
@@ -29,6 +31,8 @@ const Theme::Colors &Theme::colors(Mode m)
         QStringLiteral("#a6a6a6"),   // muted        8.63:1
         QStringLiteral("#7fb5ff"),   // link         9.96:1
         QStringLiteral("#131313"),   // codeBackground
+        QStringLiteral("#f0a3c8"),   // codeInline    9.25:1 on #1d1418, 色相 331°
+        QStringLiteral("#1d1418"),   // codeInlineBackground
         QStringLiteral("#707070"),   // border       4.24:1（非文字）
         QStringLiteral("#1c1c1c"),   // tableHeader
     };
@@ -45,23 +49,43 @@ QString Theme::documentStyleSheet(Mode m)
     const Colors &c = colors(m);
 
     // 只用 Qt rich-text 支援的 CSS 屬性子集：color、background-color、
-    // font-*、margin、padding、border（表格）、text-decoration。
-    // flex / grid / max-width 都不支援，欄寬靠 viewport margin 處理。
-    return QStringLiteral(R"(
-        body { color: %1; background-color: %2; }
-        h1 { font-size: 24pt; margin-top: 18px; margin-bottom: 10px; color: %1; }
-        h2 { font-size: 19pt; margin-top: 16px; margin-bottom: 8px; color: %1; }
-        h3 { font-size: 16pt; margin-top: 14px; margin-bottom: 6px; color: %1; }
-        h4, h5, h6 { font-size: 13pt; margin-top: 12px; margin-bottom: 6px; color: %1; }
-        p  { margin-top: 6px; margin-bottom: 6px; }
-        a  { color: %3; text-decoration: none; }
-        code { background-color: %4; color: %1; font-family: monospace; }
-        blockquote { color: %5; margin-left: 12px; padding-left: 10px; }
-        th { background-color: %6; color: %1; }
-        td { color: %1; }
-        hr { color: %7; }
-    )")
-        .arg(c.text, c.background, c.link, c.codeBackground, c.muted, c.tableHeader, c.border);
+    // font-*、margin、padding、text-decoration、以及表格的 background-color。
+    // flex / grid / max-width / border-left 都不支援 —— 欄寬靠 viewport margin，
+    // 標題分隔線與引用色條靠 MdTextBrowser::paintEvent 自繪。
+    //
+    // 刻意用具名 token 而不是 %1 %2：QString::arg 的多引數版本是按「字串中出現的
+    // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
+    // （例如 %4）就會讓其後全部錯位 —— 這個坑真的踩過，害 code 的底色拿到前景色。
+    QString css = QStringLiteral(R"(
+        body { color: @TEXT@; background-color: @BG@; }
+        h1 { font-size: 23pt; margin-top: 24px; margin-bottom: 10px; color: @TEXT@; }
+        h2 { font-size: 17pt; margin-top: 26px; margin-bottom: 10px; color: @TEXT@; }
+        h3 { font-size: 14pt; margin-top: 22px; margin-bottom: 6px; color: @TEXT@; }
+        h4, h5, h6 { font-size: 12pt; margin-top: 18px; margin-bottom: 6px; color: @TEXT@; }
+        p  { margin-top: 7px; margin-bottom: 7px; }
+        a  { color: @LINK@; text-decoration: underline; }
+        code { color: @CODE_FG@; background-color: @CODE_BG@; font-family: monospace; }
+        blockquote { color: @MUTED@; margin-left: @BQ@px; margin-top: 8px; margin-bottom: 8px; }
+        th { background-color: @TH@; color: @TEXT@; }
+        td { color: @TEXT@; }
+        hr { color: @BORDER@; }
+    )");
+
+    const QList<QPair<QString, QString>> tokens{
+        { QStringLiteral("@TEXT@"), c.text },
+        { QStringLiteral("@BG@"), c.background },
+        { QStringLiteral("@LINK@"), c.link },
+        { QStringLiteral("@MUTED@"), c.muted },
+        { QStringLiteral("@TH@"), c.tableHeader },
+        { QStringLiteral("@BORDER@"), c.border },
+        { QStringLiteral("@CODE_FG@"), c.codeInline },
+        { QStringLiteral("@CODE_BG@"), c.codeInlineBackground },
+        { QStringLiteral("@BQ@"), QString::number(BlockquoteIndentPx) },
+    };
+    for (const auto &t : tokens)
+        css.replace(t.first, t.second);
+
+    return css;
 }
 
 QPalette Theme::palette(Mode m)

@@ -21,6 +21,18 @@ public:
 
     static constexpr int ContentWidth = 980;
 
+    /// 引用區塊的左邊距（px）。
+    ///
+    /// 這個常數是 CSS 與自繪程式碼之間的**契約**：Qt rich-text 不支援
+    /// border-left，所以左側色條是在 paintEvent 裡自己畫的，而「哪些 block 是
+    /// 引用區塊」就靠這個 leftMargin 值辨識（清單項目有 textList、標題的
+    /// leftMargin 是 0，所以不會誤判）。
+    /// 由 tests/test_e2e_regression.cpp 的 blockquoteMarkerContractHolds() 盯住。
+    static constexpr int BlockquoteIndentPx = 22;
+
+    /// 引用區塊左側色條寬度（px）
+    static constexpr int BlockquoteBarPx = 4;
+
     /// WCAG 門檻
     static constexpr double MinTextContrast = 4.5;
     static constexpr double MinBodyTextContrast = 7.0;
@@ -32,6 +44,16 @@ public:
         QString muted;
         QString link;
         QString codeBackground;
+        /// 行內 `code` 的專屬前景色。刻意選與連結色**色相差 > 110°**的洋紅系。
+        ///
+        /// 注意「可區分」不能用 WCAG 對比比來判斷 —— 那只衡量亮度差，紫色與藍色
+        /// 的對比比只有 1.13:1 卻是明顯不同的顏色。這裡用色相差。
+        /// 另外兩者的區分也不只靠顏色：連結有底線，行內 code 有底色 chip 與等寬字，
+        /// 即使色覺不同的人也分得出來。
+        QString codeInline;
+        /// 行內 `code` 的底色（已把強調色以低透明度混進頁面底色，
+        /// 因為 Qt rich-text 對 rgba() 的支援不可靠，改用預先算好的實色）。
+        QString codeInlineBackground;
         QString border;
         // 註：引用區塊沒有左側色條 —— Qt rich-text 不支援 border-left，
         // 只能靠縮排表現，所以這裡刻意沒有 quoteBar 這種欄位。

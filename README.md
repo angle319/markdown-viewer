@@ -75,6 +75,31 @@ npm i -g @mermaid-js/mermaid-cli
 兩個分頁：**段落**（標題樹，隨捲動高亮）與**檔案**（只顯示資料夾與
 markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置。
 
+## 排版
+
+樣式基準是拿 Chrome extension「Markdown Reader」的實際 computed style 比對出來的
+（用本機 HTTP 伺服器餵同一份 `docs/sample.md` 給它，再抓 `getComputedStyle`）：
+
+| 元素 | 處理 |
+|---|---|
+| 行內 `` `code` `` | 專屬洋紅色 + 底色 chip + 等寬字 |
+| 連結 | 連結色 + **底線**（不只靠顏色區分） |
+| H1 / H2 | 底部 1px 分隔線（自繪，見下） |
+| 引用區塊 | 左側 4px 色條（自繪），連續段落合併成一條 |
+| 表格 | `cellpadding=8` |
+| 巢狀清單 | `setIndentWidth(20)` |
+
+行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
+「這是程式碼」還是「這是可點的連結」。另外區分也不只靠顏色：連結有底線、
+行內 code 有 chip 與等寬字。
+
+**標題分隔線與引用色條是自繪的**，因為 Qt rich-text 不支援 block 層級的
+`border-bottom` / `border-left`。`MdTextBrowser::paintEvent()` 在文字畫完後補上，
+只掃可見範圍的 block。引用區塊的辨識靠 `blockFormat().leftMargin()` 等於
+`Theme::BlockquoteIndentPx` —— 那個常數同時被 CSS 與繪製程式碼使用，是明確的契約，
+由 `blockquoteMarkerContractHolds()` 盯住（清單項目有 `textList()`、
+標題的 `leftMargin` 是 0，所以不會誤判）。
+
 ## 主題與對比
 
 兩套主題：**白色**（`#ffffff`）與**黑色**（`#000000`）。
@@ -109,8 +134,8 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 
 | 情境 | PSS | RSS |
 |---|---|---|
-| 三行小檔（基準） | 33.4 MB | 66.4 MB |
-| `docs/sample.md`（含 2 張 mermaid） | 38.9 MB | 82.1 MB |
+| 三行小檔（基準） | 33.5 MB | 66.4 MB |
+| `docs/sample.md`（含 2 張 mermaid） | 39.0 MB | 82.0 MB |
 
 其中一個關鍵設定是 `QT_XCB_GL_INTEGRATION=none`（已寫在 `src/main.cpp`）：
 xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，光那一顆就
@@ -123,7 +148,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-95 個測試函式、7 個套件：
+100 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -131,9 +156,9 @@ ctest --test-dir build --output-on-failure
 | codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
 | mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
-| theme | 14 | WCAG 對比門檻：配色、palette role、語法高亮 |
+| theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
-| e2e_regression | 19 | 以 sample.md 為語料庫釘住 pipeline 不變式 |
+| e2e_regression | 22 | 以 sample.md 為語料庫釘住 pipeline 不變式與樣式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。
