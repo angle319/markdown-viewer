@@ -8,6 +8,7 @@
 class FileWatcher;
 class IRenderBackend;
 class MermaidCache;
+class PathBar;
 class MmdcRenderer;
 class Sidebar;
 class QAction;
@@ -27,15 +28,20 @@ public:
 protected:
     void closeEvent(QCloseEvent *e) override;
 
+public Q_SLOTS:
+    /// 路徑列送出：檔案就開啟、資料夾就換側邊欄根目錄、不存在就在狀態列說明。
+    void onPathSubmitted(const QString &path);
+
 private Q_SLOTS:
     void onOpenTriggered();
     void onReloadTriggered();
-    void onThemeToggled(bool dark);
     void onLinkActivated(const QUrl &url);
+    void focusPathBar();
 
 private:
     void buildUi();
     void buildMenus();
+    void setMode(Theme::Mode mode);
     void reparse(bool preserveScroll);
     void loadSettings();
     void saveSettings();
@@ -48,8 +54,10 @@ private:
     MermaidCache *m_cache = nullptr;
     FileWatcher *m_watcher = nullptr;
 
+    PathBar *m_pathBar = nullptr;
     QAction *m_actSidebar = nullptr;
-    QAction *m_actTheme = nullptr;
+    QAction *m_actWhite = nullptr;
+    QAction *m_actBlack = nullptr;
     QLabel *m_statusRight = nullptr;
 
     QString m_path;

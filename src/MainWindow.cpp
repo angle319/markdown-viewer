@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "PathBar.h"
 #include "Sidebar.h"
 #include "FileBrowserPanel.h"
 #include "TocPanel.h"
@@ -10,6 +11,7 @@
 #include "render/TextBrowserBackend.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QtMath>
@@ -22,7 +24,9 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSettings>
+#include <QShortcut>
 #include <QSplitter>
+#include <QVBoxLayout>
 #include <QStatusBar>
 #include <QTextStream>
 
@@ -69,7 +73,20 @@ void MainWindow::buildUi()
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
     m_splitter->setChildrenCollapsible(false);
-    setCentralWidget(m_splitter);
+
+    m_pathBar = new PathBar(this);
+
+    auto *central = new QWidget(this);
+    auto *box = new QVBoxLayout(central);
+    box->setContentsMargins(0, 0, 0, 0);
+    box->setSpacing(0);
+    box->addWidget(m_pathBar);
+    box->addWidget(m_splitter, 1);
+    setCentralWidget(central);
+
+    connect(m_pathBar, &PathBar::pathSubmitted, this, &MainWindow::onPathSubmitted);
+    connect(m_pathBar, &PathBar::cancelled, this,
+            [this] { m_backend->widget()->setFocus(Qt::OtherFocusReason); });
 
     m_statusRight = new QLabel(this);
     statusBar()->addPermanentWidget(m_statusRight);
@@ -132,10 +149,32 @@ void MainWindow::buildMenus()
     connect(m_actSidebar, &QAction::toggled, this,
             [this](bool on) { m_sidebar->setVisible(on); });
 
-    m_actTheme = viewMenu->addAction(QStringLiteral("暗色主題"));
-    m_actTheme->setCheckable(true);
-    m_actTheme->setShortcut(QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_T));
-    connect(m_actTheme, &QAction::toggled, this, &MainWindow::onThemeToggled);
+    viewMenu->addSeparator();
+    auto *themeGroup = new QActionGroup(this);
+    themeGroup->setExclusive(true);
+
+    m_actWhite = viewMenu->addAction(Theme::name(Theme::Light));
+    m_actWhite->setCheckable(true);
+    m_actWhite->setShortcut(QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_1));
+    themeGroup->addAction(m_actWhite);
+    connect(m_actWhite, &QAction::triggered, this, [this] { setMode(Theme::Light); });
+
+    m_actBlack = viewMenu->addAction(Theme::name(Theme::Dark));
+    m_actBlack->setCheckable(true);
+    m_actBlack->setShortcut(QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_2));
+    themeGroup->addAction(m_actBlack);
+    connect(m_actBlack, &QAction::triggered, this, [this] { setMode(Theme::Dark); });
+
+    auto *actToggleTheme = viewMenu->addAction(QStringLiteral("切換主題"));
+    actToggleTheme->setShortcut(QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_T));
+    connect(actToggleTheme, &QAction::triggered, this,
+            [this] { setMode(m_mode == Theme::Dark ? Theme::Light : Theme::Dark); });
+
+    viewMenu->addSeparator();
+    auto *actFocusPath = viewMenu->addAction(QStringLiteral("聚焦路徑列"));
+    actFocusPath->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+    connect(actFocusPath, &QAction::triggered, this, &MainWindow::focusPathBar);
+    addAction(actFocusPath);
 
     viewMenu->addSeparator();
     auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
@@ -185,6 +224,7 @@ bool MainWindow::openFile(const QString &path)
 
     reparse(false);
     m_watcher->watch(m_path);
+    m_pathBar->setPath(m_path);
 
     if (m_sidebar->files()->root().isEmpty()
         || !m_path.startsWith(m_sidebar->files()->root()))
@@ -243,14 +283,59 @@ void MainWindow::onReloadTriggered()
     openFile(m_path);
 }
 
-void MainWindow::onThemeToggled(bool dark)
+void MainWindow::setMode(Theme::Mode mode)
 {
-    m_mode = dark ? Theme::Dark : Theme::Light;
+    if (m_mode == mode && (m_actWhite->isChecked() || m_actBlack->isChecked()))
+        return;
+
+    m_mode = mode;
+    (mode == Theme::Dark ? m_actBlack : m_actWhite)->setChecked(true);
+
     // 語法高亮的配色是在產 HTML 時決定的，所以主題切換必須重新解析
     if (!m_markdown.isEmpty())
         reparse(true);
     else
         m_backend->setTheme(m_mode);
+
+    // 套到整個 application：選單列、分頁標籤、對話框都要跟著換，
+    // 只設在 MainWindow 上的話 QMenuBar 之類的仍會用預設淺色系。
+    const QPalette pal = Theme::palette(m_mode);
+    qApp->setPalette(pal);
+    setPalette(pal);
+    m_pathBar->setPalette(pal);
+    m_sidebar->setPalette(pal);
+}
+
+void MainWindow::focusPathBar()
+{
+    m_pathBar->focusAndSelectAll();
+}
+
+void MainWindow::onPathSubmitted(const QString &path)
+{
+    const QFileInfo fi(path);
+
+    if (fi.isDir()) {
+        m_sidebar->files()->setRoot(fi.absoluteFilePath());
+        m_sidebar->setCurrentIndex(1);          // 切到「檔案」分頁
+        if (!m_actSidebar->isChecked())
+            m_actSidebar->setChecked(true);
+        updateStatus(QStringLiteral("已切換資料夾: ") + fi.absoluteFilePath());
+        return;
+    }
+
+    if (!fi.exists()) {
+        updateStatus(QStringLiteral("路徑不存在: ") + path);
+        return;
+    }
+
+    if (!looksLikeMarkdown(path)) {
+        updateStatus(QStringLiteral("不是 markdown 檔，交給系統開啟: ") + fi.fileName());
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absoluteFilePath()));
+        return;
+    }
+
+    openFile(fi.absoluteFilePath());
 }
 
 void MainWindow::onLinkActivated(const QUrl &url)
@@ -316,7 +401,7 @@ void MainWindow::loadSettings()
     restoreState(s.value(QStringLiteral("window/state")).toByteArray());
 
     const bool dark = s.value(QStringLiteral("view/dark"), false).toBool();
-    m_actTheme->setChecked(dark);   // 觸發 onThemeToggled
+    setMode(dark ? Theme::Dark : Theme::Light);
 
     const bool sidebarVisible = s.value(QStringLiteral("view/sidebar"), true).toBool();
     m_actSidebar->setChecked(sidebarVisible);

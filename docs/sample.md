@@ -95,6 +95,17 @@ sequenceDiagram
 
 ### 重複
 
+## 對比保護
+
+markdown 可以內嵌原始 HTML，裡面可能寫死了顏色。以下這幾種在某一個主題下
+本來會完全看不見，應該被自動改成該背景上讀得到的顏色：
+
+<span style="color:#000000">寫死純黑的文字（黑色主題下本來會隱形）</span>
+
+<span style="color:#ffffff">寫死純白的文字（白色主題下本來會隱形）</span>
+
+<span style="background-color:#ffffff">寫死白底的文字（黑色主題下本來會隱形）</span>
+
 ## 圖片
 
 存在的圖片（若有）與不存在的圖片各一張：

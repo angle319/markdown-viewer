@@ -62,7 +62,17 @@ MmdcRenderer::MmdcRenderer(QObject *parent)
 {
 }
 
-MmdcRenderer::~MmdcRenderer() = default;
+MmdcRenderer::~MmdcRenderer()
+{
+    // 關閉時若還有渲染在跑，QProcess 被連帶解構會發出
+    // "Destroyed while process is still running" 並可能留下孤兒行程。
+    // 明確終止並等它收屍。
+    if (m_proc && m_proc->state() != QProcess::NotRunning) {
+        m_proc->disconnect(this);
+        m_proc->kill();
+        m_proc->waitForFinished(3000);
+    }
+}
 
 QString MmdcRenderer::findMmdc()
 {

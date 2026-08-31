@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QPainter>
 #include <QPainterPath>
+
+#include <cmath>
 #include <QScrollBar>
 #include <QSvgRenderer>
 #include <QTextBlock>
@@ -38,6 +40,47 @@ QImage placeholderImage(int width, const QString &text, const Theme::Colors &c)
     p.setPen(QColor(c.muted));
     p.drawText(QRectF(0, 0, width, h), Qt::AlignCenter, text);
     return img;
+}
+
+/// 透明背景的圖片若內容顏色與頁面底色太接近，在該主題下等於看不見。
+/// 這裡量可見像素的平均亮度，對比不足就墊一層中性底色（含 padding）。
+/// mermaid 的圖不走這裡 —— 它的主題由我們指定，本來就與頁面相符。
+QImage backdropIfLowContrast(const QImage &img, const QColor &pageBg)
+{
+    if (img.isNull() || !img.hasAlphaChannel())
+        return img;
+
+    double sum = 0.0;
+    int n = 0;
+    const int step = qMax(1, qMin(img.width(), img.height()) / 64);
+    for (int y = 0; y < img.height(); y += step) {
+        for (int x = 0; x < img.width(); x += step) {
+            const QColor c = img.pixelColor(x, y);
+            if (c.alpha() < 32)
+                continue;
+            sum += Theme::relativeLuminance(c);
+            ++n;
+        }
+    }
+    if (n == 0)
+        return img;   // 全透明，沒得救也沒得壞
+
+    const double meanLum = sum / n;
+    // 用平均亮度組一個代表灰階來算對比（sRGB 反伽瑪）
+    const int v = qBound(0, int(qRound(std::pow(meanLum, 1.0 / 2.2) * 255.0)), 255);
+    const QColor representative(v, v, v);
+
+    if (Theme::contrastRatio(representative, pageBg) >= Theme::MinNonTextContrast)
+        return img;
+
+    const QColor card = meanLum < 0.5 ? QColor(0xf2, 0xf2, 0xf2) : QColor(0x13, 0x13, 0x13);
+    const int pad = 8;
+    QImage out(img.width() + pad * 2, img.height() + pad * 2,
+               QImage::Format_ARGB32_Premultiplied);
+    out.fill(card);
+    QPainter p(&out);
+    p.drawImage(pad, pad, img);
+    return out;
 }
 
 QImage rasterizeSvg(const QString &path, int maxWidth, QSize *logicalOut)
@@ -89,6 +132,72 @@ public:
     }
 
     void setDark(bool dark) { m_dark = dark; }
+    Theme::Mode mode() const { return m_dark ? Theme::Dark : Theme::Light; }
+
+    /// 保證沒有「看不見的文字」。
+    ///
+    /// markdown 可以內嵌原始 HTML，裡面可能寫死了顏色（`<span style="color:#000">`），
+    /// 那在黑色主題下就是隱形的。這裡對每個文字片段算它與「實際背景」的 WCAG
+    /// 對比，不足 4.5:1 就換成該背景上讀得到的顏色。
+    /// 實際背景的判定順序：片段自己的背景 → 所屬 block 的背景 → 頁面底色。
+    void applyContrastFixups()
+    {
+        const Theme::Mode m = mode();
+        const QColor pageBg(Theme::colors(m).background);
+        const QColor themeText(Theme::colors(m).text);
+
+        struct Fix {
+            int start;
+            int end;
+            QColor fg;
+        };
+        QVector<Fix> fixes;
+
+        QTextDocument *doc = document();
+        for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+            QColor blockBg = pageBg;
+            if (b.blockFormat().background().style() != Qt::NoBrush) {
+                const QColor c = b.blockFormat().background().color();
+                if (c.isValid() && c.alpha() > 0)
+                    blockBg = c;
+            }
+
+            for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+                const QTextFragment f = it.fragment();
+                if (!f.isValid() || f.charFormat().isImageFormat())
+                    continue;
+                if (f.text().trimmed().isEmpty())
+                    continue;
+
+                const QTextCharFormat cf = f.charFormat();
+
+                QColor bg = blockBg;
+                if (cf.background().style() != Qt::NoBrush) {
+                    const QColor c = cf.background().color();
+                    if (c.isValid() && c.alpha() > 0)
+                        bg = c;
+                }
+                const QColor fg = cf.foreground().style() != Qt::NoBrush
+                                      ? cf.foreground().color()
+                                      : themeText;
+
+                if (Theme::contrastRatio(fg, bg) < Theme::MinTextContrast)
+                    fixes.append({ f.position(), f.position() + f.length(),
+                                   Theme::readableOn(bg, m) });
+            }
+        }
+
+        for (int i = fixes.size() - 1; i >= 0; --i) {
+            const Fix &fx = fixes.at(i);
+            QTextCursor cur(doc);
+            cur.setPosition(fx.start);
+            cur.setPosition(fx.end, QTextCursor::KeepAnchor);
+            // merge 而非 set：只換前景色，其餘格式（字型、粗體…）保留
+            QTextCharFormat merge;
+            merge.setForeground(fx.fg);
+            cur.mergeCharFormat(merge);
+        }
+    }
 
     /// 圖片的邏輯（顯示）尺寸，由 loadResource 記錄、供 applyImageSizing 使用。
     QSize logicalSize(const QString &url) const { return m_logicalSize.value(url); }
@@ -227,6 +336,9 @@ protected:
         else
             img = qvariant_cast<QImage>(QTextBrowser::loadResource(type, name));
 
+        if (!img.isNull())
+            img = backdropIfLowContrast(img, QColor(Theme::colors(mode()).background));
+
         if (img.isNull()) {
             m_known.insert(url, false);
             m_logicalSize.remove(url);
@@ -332,6 +444,7 @@ void TextBrowserBackend::render(bool preserveScroll)
 
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyContrastFixups();
 
     if (m_zoomSteps != 0) {
         if (m_zoomSteps > 0)
@@ -368,6 +481,7 @@ void TextBrowserBackend::mermaidReady(const QString &key)
     m_view->setMermaidSources(m_doc.mermaid);
     m_view->setHtml(m_doc.html);
     m_view->applyImageSizing();
+    m_view->applyContrastFixups();
     setScrollValue(scroll);
 }
 

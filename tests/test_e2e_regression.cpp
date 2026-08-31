@@ -13,6 +13,7 @@
 #include <QTreeWidget>
 
 #include "MainWindow.h"
+#include "Theme.h"
 #include "core/MarkdownParser.h"
 
 #ifndef SAMPLE_MD
@@ -56,13 +57,20 @@ private slots:
     // --- 狀態切換不破壞不變式 ---
     void themeRoundTripPreservesStructure();
     void reloadPreservesStructure();
+    void everyTextFragmentIsReadableInBothThemes();
+    void hardcodedColoursInSampleAreCorrected();
 
     // --- 可選的視覺輸出 ---
     void dumpScreenshotsIfRequested();
 
 private:
     QTextBrowser *browser() const { return m_win->findChild<QTextBrowser *>(); }
+    QAction *actionNamed(const QString &text) const;
     int headingBlockCount() const;
+
+    /// 掃全文件，回傳「對比不足的文字片段」清單（片段文字 + 前景 + 背景 + 比值）。
+    /// 有效背景的判定順序與 render backend 一致：片段背景 → block 背景 → 頁面底色。
+    QStringList lowContrastFragments(Theme::Mode mode) const;
     int tableCount() const;
 
     QString m_markdown;
@@ -107,6 +115,57 @@ int TestE2eRegression::headingBlockCount() const
     return n;
 }
 
+QAction *TestE2eRegression::actionNamed(const QString &text) const
+{
+    for (QAction *a : m_win->findChildren<QAction *>())
+        if (a->text() == text)
+            return a;
+    return nullptr;
+}
+
+QStringList TestE2eRegression::lowContrastFragments(Theme::Mode mode) const
+{
+    const QColor pageBg(Theme::colors(mode).background);
+    const QColor themeText(Theme::colors(mode).text);
+
+    QStringList bad;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        QColor blockBg = pageBg;
+        if (b.blockFormat().background().style() != Qt::NoBrush) {
+            const QColor c = b.blockFormat().background().color();
+            if (c.isValid() && c.alpha() > 0)
+                blockBg = c;
+        }
+
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (!f.isValid() || f.charFormat().isImageFormat())
+                continue;
+            if (f.text().trimmed().isEmpty())
+                continue;
+
+            const QTextCharFormat cf = f.charFormat();
+            QColor bg = blockBg;
+            if (cf.background().style() != Qt::NoBrush) {
+                const QColor c = cf.background().color();
+                if (c.isValid() && c.alpha() > 0)
+                    bg = c;
+            }
+            const QColor fg = cf.foreground().style() != Qt::NoBrush
+                                  ? cf.foreground().color()
+                                  : themeText;
+
+            const double r = Theme::contrastRatio(fg, bg);
+            if (r < Theme::MinTextContrast)
+                bad << QStringLiteral("\"%1\" %2 on %3 = %4:1")
+                           .arg(f.text().left(24), fg.name(), bg.name())
+                           .arg(r, 0, 'f', 2);
+        }
+    }
+    return bad;
+}
+
 int TestE2eRegression::tableCount() const
 {
     int n = 0;
@@ -140,6 +199,7 @@ void TestE2eRegression::tocAnchorsMatchGolden()
         QStringLiteral("重複"),
         QStringLiteral("重複-1"),
         QStringLiteral("重複-2"),
+        QStringLiteral("對比保護"),
         QStringLiteral("圖片"),
         QStringLiteral("分隔線"),
     };
@@ -304,18 +364,16 @@ void TestE2eRegression::themeRoundTripPreservesStructure()
     const int headings = headingBlockCount();
     const int tables = tableCount();
 
-    QAction *theme = nullptr;
-    for (QAction *a : m_win->findChildren<QAction *>())
-        if (a->text() == QStringLiteral("暗色主題"))
-            theme = a;
-    QVERIFY(theme);
+    QAction *black = actionNamed(QStringLiteral("黑色主題"));
+    QAction *white = actionNamed(QStringLiteral("白色主題"));
+    QVERIFY(black && white);
 
-    theme->setChecked(true);
+    black->trigger();
     QCOMPARE(headingBlockCount(), headings);
     QCOMPARE(tableCount(), tables);
     QVERIFY(browser()->toPlainText().contains(QStringLiteral("中文欄位")));
 
-    theme->setChecked(false);
+    white->trigger();
     QCOMPARE(headingBlockCount(), headings);
     QCOMPARE(tableCount(), tables);
 }
@@ -330,6 +388,63 @@ void TestE2eRegression::reloadPreservesStructure()
     QCOMPARE(headingBlockCount(), headings);
     QCOMPARE(tableCount(), tables);
     QCOMPARE(m_win->findChild<QTreeWidget *>()->topLevelItemCount(), 1);
+}
+
+void TestE2eRegression::everyTextFragmentIsReadableInBothThemes()
+{
+    // 這是「不要有看不見的狀況」的總體不變式：sample.md 刻意包含寫死顏色的
+    // 原始 HTML，若 render backend 的對比修正沒跑（或漏跑某條路徑），這裡會炸。
+    for (Theme::Mode m : { Theme::Light, Theme::Dark }) {
+        actionNamed(Theme::name(m))->trigger();
+        QCOMPARE(browser()->palette().color(QPalette::Base),
+                 QColor(Theme::colors(m).background));
+
+        const QStringList bad = lowContrastFragments(m);
+        if (!bad.isEmpty())
+            qWarning().noquote() << Theme::name(m) << "對比不足的片段:\n"
+                                 << bad.join(QStringLiteral("\n"));
+        QVERIFY2(bad.isEmpty(),
+                 qPrintable(QStringLiteral("%1 有 %2 個看不見／難看見的片段")
+                                .arg(Theme::name(m)).arg(bad.size())));
+    }
+    actionNamed(Theme::name(Theme::Light))->trigger();
+}
+
+void TestE2eRegression::hardcodedColoursInSampleAreCorrected()
+{
+    // 確認上一支測試不是因為「沒有東西需要修正」而空過
+    actionNamed(Theme::name(Theme::Dark))->trigger();
+
+    int checked = 0;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (!f.isValid())
+                continue;
+            if (!f.text().contains(QStringLiteral("寫死純黑"))
+                && !f.text().contains(QStringLiteral("寫死白底")))
+                continue;
+
+            const QTextCharFormat cf = f.charFormat();
+            const QColor fg = cf.foreground().style() != Qt::NoBrush
+                                  ? cf.foreground().color()
+                                  : QColor(Theme::colors(Theme::Dark).text);
+            QColor bg(Theme::colors(Theme::Dark).background);
+            if (cf.background().style() != Qt::NoBrush && cf.background().color().alpha() > 0)
+                bg = cf.background().color();
+
+            const double r = Theme::contrastRatio(fg, bg);
+            qInfo().noquote() << f.text().left(20) << "→ fg" << fg.name()
+                              << "bg" << bg.name() << QStringLiteral("%1:1").arg(r, 0, 'f', 2);
+            QVERIFY(r >= Theme::MinTextContrast);
+            ++checked;
+        }
+    }
+    QVERIFY2(checked >= 2,
+             qPrintable(QStringLiteral("只找到 %1 個寫死顏色的片段，語料可能被改掉了")
+                            .arg(checked)));
+    actionNamed(Theme::name(Theme::Light))->trigger();
 }
 
 void TestE2eRegression::dumpScreenshotsIfRequested()
@@ -348,22 +463,18 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
         bool dark;
     };
     const QList<Shot> shots{
-        { QStringLiteral("01-top-light"),     QString(),                       false },
-        { QStringLiteral("02-code-light"),    QStringLiteral("程式碼"),         false },
-        { QStringLiteral("03-mermaid-light"), QStringLiteral("mermaid"),        false },
-        { QStringLiteral("04-table-light"),   QStringLiteral("表格"),           false },
-        { QStringLiteral("05-top-dark"),      QString(),                       true  },
-        { QStringLiteral("06-mermaid-dark"),  QStringLiteral("mermaid"),        true  },
+        { QStringLiteral("01-top-white"),      QString(),                false },
+        { QStringLiteral("02-code-white"),     QStringLiteral("程式碼"),  false },
+        { QStringLiteral("03-mermaid-white"),  QStringLiteral("mermaid"), false },
+        { QStringLiteral("04-contrast-white"), QStringLiteral("對比保護"), false },
+        { QStringLiteral("05-top-black"),      QString(),                true  },
+        { QStringLiteral("06-code-black"),     QStringLiteral("程式碼"),  true  },
+        { QStringLiteral("07-mermaid-black"),  QStringLiteral("mermaid"), true  },
+        { QStringLiteral("08-contrast-black"), QStringLiteral("對比保護"), true  },
     };
 
-    QAction *theme = nullptr;
-    for (QAction *a : m_win->findChildren<QAction *>())
-        if (a->text() == QStringLiteral("暗色主題"))
-            theme = a;
-    QVERIFY(theme);
-
     for (const Shot &sh : shots) {
-        theme->setChecked(sh.dark);
+        actionNamed(Theme::name(sh.dark ? Theme::Dark : Theme::Light))->trigger();
 
         // 等 mermaid 圖真的畫完再截，否則只會拍到「產生中」的佔位圖
         QTRY_VERIFY_WITH_TIMEOUT([this] {
@@ -389,7 +500,7 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
         qInfo() << "已存" << path;
     }
 
-    theme->setChecked(false);
+    actionNamed(Theme::name(Theme::Light))->trigger();
 }
 
 QTEST_MAIN(TestE2eRegression)

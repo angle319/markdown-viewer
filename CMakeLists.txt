@@ -48,6 +48,7 @@ if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
         src/Sidebar.cpp
         src/TocPanel.cpp
         src/FileBrowserPanel.cpp
+        src/PathBar.cpp
         src/Theme.cpp
         src/render/IRenderBackend.cpp
         src/render/TextBrowserBackend.cpp
@@ -86,7 +87,7 @@ endif()
 
 # e2e: 驅動真正的 MainWindow, 用 offscreen platform 跑
 if(MD_GUI_AVAILABLE)
-    foreach(t e2e_viewer e2e_regression)
+    foreach(t theme e2e_viewer e2e_regression)
         add_executable(test_${t} tests/test_${t}.cpp)
         target_link_libraries(test_${t} PRIVATE mdgui Qt6::Test)
         add_test(NAME ${t} COMMAND test_${t})

@@ -17,12 +17,24 @@ struct Palette {
 
 const Palette &palette(bool dark)
 {
-    static const Palette light{ QStringLiteral("#0033b3"), QStringLiteral("#a31515"),
-                                QStringLiteral("#3f7f5f"), QStringLiteral("#098658"),
-                                QStringLiteral("#f6f8fa"), QStringLiteral("#24292f") };
-    static const Palette night{ QStringLiteral("#82aaff"), QStringLiteral("#c3e88d"),
-                                QStringLiteral("#7f848e"), QStringLiteral("#f78c6c"),
-                                QStringLiteral("#1f2430"), QStringLiteral("#d7dae0") };
+    // 全部對著各自的 preBg 算過 WCAG 對比，最低 4.5:1；
+    // 門檻由 tests/test_theme.cpp 的 syntaxColoursAreReadable() 守著。
+    static const Palette light{
+        QStringLiteral("#0b3fbf"),   // keyword  7.57:1
+        QStringLiteral("#9b1414"),   // string   7.49:1
+        QStringLiteral("#20693f"),   // comment  5.95:1
+        QStringLiteral("#0a5f4a"),   // number   6.82:1
+        QStringLiteral("#f2f2f2"),   // preBg（與 Theme::codeBackground 一致）
+        QStringLiteral("#111111"),   // preFg   16.87:1
+    };
+    static const Palette night{
+        QStringLiteral("#93bbff"),   // keyword  9.55:1
+        QStringLiteral("#b9e88f"),   // string  13.27:1
+        QStringLiteral("#9fb0a6"),   // comment  8.17:1
+        QStringLiteral("#ffb182"),   // number  10.50:1
+        QStringLiteral("#131313"),   // preBg
+        QStringLiteral("#ebebeb"),   // preFg   15.59:1
+    };
     return dark ? night : light;
 }
 

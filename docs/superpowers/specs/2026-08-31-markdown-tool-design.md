@@ -276,3 +276,67 @@ e2e 以 `QT_QPA_PLATFORM=offscreen` 執行，不需要 X／Wayland。
 `setDocument()` 內就會發出 `currentTocIndexChanged`，而 `TocPanel` 隨後被
 `setToc()` 清空重建，於是捲動高亮永遠是空的。順序反過來即修好。
 由 `scrollingUpdatesTocHighlight()` 盯住。
+
+## 13. 第二輪：雙主題對比保證與路徑列（2026-08-31）
+
+### 13.1 白色／黑色主題
+
+底色改為純 `#ffffff` 與純 `#000000`。所有顏色以 WCAG 2.1 相對亮度計算，
+門檻寫成常數（`Theme::MinBodyTextContrast` 等）並由 `tests/test_theme.cpp` 驗證：
+正文 ≥ 7:1、次要文字與連結 ≥ 4.5:1、非文字元素 ≥ 3:1。
+語法高亮配色也重算過，對著各自的程式碼底色最低 4.5:1。
+
+驗證方式刻意做成黑箱：真的產出高亮 HTML，用 regex 抽出 `<pre>` 的背景色與每一個
+`color:`，逐組算對比（目前 208 組）。日後新增語言會自動被檢查，不需要另外開 API。
+
+### 13.2 「不要有看不見的狀況」的三層保護
+
+配色合格只解決了我們自己選的顏色。markdown 可以內嵌任意 HTML，所以還加了兩道
+執行期保護：
+
+1. **`MdTextBrowser::applyContrastFixups()`** —— 逐片段算它與「實際背景」的對比
+   （判定順序：片段背景 → block 背景 → 頁面底色），不足 4.5:1 就用
+   `Theme::readableOn()` 換成該背景上讀得到的顏色。用 `mergeCharFormat` 而非
+   `setCharFormat`，只換前景色、保留字型與粗體等格式。
+2. **`backdropIfLowContrast()`** —— 透明背景的圖片，取樣可見像素的平均亮度組成
+   代表色，與頁面底色對比不足 3:1 就墊一層中性底色（含 8px padding）。
+   mermaid 不走這條，它的主題由我們指定。
+
+第三層是 `QPalette`。**踩過的坑**：只設 `Window`/`Base`/`Text` 是不夠的 ——
+`QTabBar` 與 `QMenuBar` 會用預設的 `Button`/`ButtonText`（淺色系）去畫，
+黑色主題下就是隱形的分頁標籤與隱形選單列。這是靠人眼看截圖發現的，
+自動化斷言當時全綠。現在 role 設滿、套用到 `qApp` 層級，並由
+`paletteRolePairsAreReadable()` 與 `paletteHasNoDefaultLightRolesInBlackTheme()`
+盯住。
+
+`docs/sample.md` 新增「對比保護」章節作為語料，
+`everyTextFragmentIsReadableInBothThemes()` 在兩個主題下掃全文件；
+`hardcodedColoursInSampleAreCorrected()` 另外確認那些片段真的被改過，
+避免前一支測試因為「沒有東西需要修正」而空過。
+
+### 13.3 路徑列
+
+視窗最上方的 `PathBar`，行為比照瀏覽器網址列。`Ctrl+L` 聚焦並全選；
+輸入資料夾會切到側邊欄「檔案」分頁並換根，而不是把資料夾當 markdown 開；
+`Esc` 還原並把焦點交回內容區；支援 `~` 展開、相對路徑與 `file://` URL。
+路徑解析抽成 `PathBar::resolveInput()` 這個純函式，可獨立單元測試。
+
+主題選單改成兩個互斥選項（`Alt+Shift+1` / `Alt+Shift+2`）加一個切換動作
+（`Alt+Shift+T`），取代原本單一的 checkbox。
+
+### 13.4 順手修掉的清理問題
+
+`MmdcRenderer` 的解構子原本是 `= default`，關閉時若還有渲染在跑會發出
+`QProcess: Destroyed while process is still running` 並可能留下孤兒行程。
+現在明確 kill 並 `waitForFinished`。
+
+### 13.5 數字
+
+| 情境 | PSS | RSS |
+|---|---|---|
+| 三行小檔（基準） | 33.4 MB | 66.4 MB |
+| `docs/sample.md` | 38.9 MB | 82.1 MB |
+
+路徑列的 `QFileSystemModel` 與 `QCompleter` 約增加 0.7MB，仍在 40MB 目標內。
+
+測試成長為 **7 個套件、95 個測試函式**，全數通過。

@@ -50,14 +50,55 @@ npm i -g @mermaid-js/mermaid-cli
 
 | 快捷鍵 | 動作 |
 |---|---|
-| `Ctrl+O` | 開啟 |
+| `Ctrl+L` | **聚焦路徑列**（全選，可直接覆寫） |
+| `Ctrl+O` | 用檔案對話框開啟 |
 | `F5` | 重新載入 |
 | `F9` | 側邊欄顯示／隱藏 |
-| `Alt+Shift+T` | 明暗主題 |
+| `Alt+Shift+1` | 白色主題 |
+| `Alt+Shift+2` | 黑色主題 |
+| `Alt+Shift+T` | 切換主題 |
 | `Ctrl++` / `Ctrl+-` / `Ctrl+0` | 縮放 |
 
-側邊欄有兩個分頁：**段落**（標題樹，隨捲動高亮）與**檔案**（只顯示資料夾與
+### 路徑列
+
+視窗最上方是可編輯的路徑列，行為比照瀏覽器的網址列：
+
+- `Ctrl+L` 聚焦並全選，直接打新路徑後 Enter 開啟
+- 輸入**資料夾**會切到側邊欄的「檔案」分頁並換根，而不是把資料夾當 markdown 開
+- 支援 `~` 展開、相對路徑（相對目前檔案所在目錄）、以及貼上 `file://` URL
+- 自動完成由 `QFileSystemModel` 提供
+- `Esc` 還原成目前檔案的路徑並把焦點交回內容區
+- 路徑不存在時只在狀態列說明，不會關掉目前開著的文件
+
+### 側邊欄
+
+兩個分頁：**段落**（標題樹，隨捲動高亮）與**檔案**（只顯示資料夾與
 markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置。
+
+## 主題與對比
+
+兩套主題：**白色**（`#ffffff`）與**黑色**（`#000000`）。
+
+對比是硬性要求而非美感偏好，全部用 WCAG 2.1 相對亮度計算並由測試釘住門檻：
+正文 ≥ 7:1、次要文字與連結 ≥ 4.5:1、框線等非文字元素 ≥ 3:1。
+`tests/test_theme.cpp` 會檢查主題配色、`QPalette` 的每一組 role、
+以及所有語言的語法高亮顏色（實際產出 HTML 後逐一抽出來算，共 208 組）。
+
+除了「配色本身合格」，還有兩道執行期的保護，因為 markdown 可以內嵌任意 HTML：
+
+1. **文字對比修正**：算每個文字片段與其**實際背景**（片段背景 → block 背景 →
+   頁面底色）的對比，不足 4.5:1 就換成該背景上讀得到的顏色。這救的是
+   `<span style="color:#000000">` 這類寫死顏色在黑色主題下隱形的情況。
+2. **低對比圖片墊底**：透明背景的圖片若內容亮度與頁面底色太接近，會墊一層
+   中性底色。mermaid 不走這條 —— 它的主題由我們指定，本來就與頁面相符。
+
+`docs/sample.md` 的「對比保護」章節就是這幾種情況的語料，
+`everyTextFragmentIsReadableInBothThemes()` 會在兩個主題下掃全文件驗證。
+
+踩過的坑：`QPalette` 只設 `Window`/`Base`/`Text` 是不夠的。`QTabBar` 與
+`QMenuBar` 會用預設的 `Button`/`ButtonText`（淺色系）去畫，黑色主題下就變成
+隱形的分頁標籤與隱形選單列。現在 role 設滿，並由
+`paletteHasNoDefaultLightRolesInBlackTheme()` 盯住。
 
 `docs/sample.md` 涵蓋所有 v0.1 該處理的語法，用來手動驗收。
 
@@ -68,13 +109,13 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 
 | 情境 | PSS | RSS |
 |---|---|---|
-| 三行小檔（基準） | 32.7 MB | 65.7 MB |
-| `docs/sample.md`（含 2 張 mermaid） | 38.1 MB | 80.5 MB |
+| 三行小檔（基準） | 33.4 MB | 66.4 MB |
+| `docs/sample.md`（含 2 張 mermaid） | 38.9 MB | 82.1 MB |
 
 其中一個關鍵設定是 `QT_XCB_GL_INTEGRATION=none`（已寫在 `src/main.cpp`）：
 xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，光那一顆就
 **13.2 MB PSS**，而這個 app 全程 raster 繪製、完全不用 OpenGL。設掉之後
-基準從 49.1MB 降到 32.7MB。
+基準從 49.1MB 降到 32.7MB（加入路徑列後為 33.4MB）。
 
 ## 測試
 
@@ -82,7 +123,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-71 個測試函式、6 個套件：
+95 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -90,8 +131,9 @@ ctest --test-dir build --output-on-failure
 | codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
 | mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
-| e2e_viewer | 14 | 驅動真正的 MainWindow 走使用者流程 |
-| e2e_regression | 17 | 以 sample.md 為語料庫釘住 pipeline 不變式 |
+| theme | 14 | WCAG 對比門檻：配色、palette role、語法高亮 |
+| e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
+| e2e_regression | 19 | 以 sample.md 為語料庫釘住 pipeline 不變式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。
@@ -102,7 +144,7 @@ e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在�
 MD_E2E_DUMP=/tmp/shots QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
 ```
 
-會輸出明暗主題下的頂端、程式碼、表格、mermaid 畫面 PNG。
+會輸出白／黑兩個主題下的頂端、程式碼、mermaid、對比保護章節共 8 張 PNG。
 
 ## 狀態
 

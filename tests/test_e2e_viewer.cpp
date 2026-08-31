@@ -8,6 +8,8 @@
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QLineEdit>
+#include <QStatusBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -17,6 +19,8 @@
 #include <QTreeWidget>
 
 #include "MainWindow.h"
+#include "PathBar.h"
+#include "Theme.h"
 #include "core/MmdcRenderer.h"
 
 /// e2e：驅動真正的 MainWindow，走使用者實際會走的流程。
@@ -38,7 +42,17 @@ private slots:
     void clickingFileInBrowserOpensIt();
     void relativeMarkdownLinkNavigates();
     void anchorLinkScrollsWithinDocument();
-    void themeToggleKeepsTocAndScroll();
+    void themeSwitchKeepsTocAndScroll();
+    void themesAreWhiteAndBlack();
+    void hardcodedInvisibleColourIsCorrected();
+
+    // --- 路徑列 ---
+    void pathBarShowsCurrentFile();
+    void pathBarOpensTypedFile();
+    void pathBarSwitchesFolderWhenGivenDirectory();
+    void pathBarReportsMissingPathWithoutCrashing();
+    void pathBarExpandsTildeAndRelativePaths();
+    void ctrlLFocusesPathBar();
     void zoomChangesFontSizeAndResets();
     void sidebarCanBeHidden();
     void externalEditTriggersReload();
@@ -454,7 +468,7 @@ void TestE2eViewer::anchorLinkScrollsWithinDocument()
     QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
 }
 
-void TestE2eViewer::themeToggleKeepsTocAndScroll()
+void TestE2eViewer::themeSwitchKeepsTocAndScroll()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
@@ -462,18 +476,166 @@ void TestE2eViewer::themeToggleKeepsTocAndScroll()
     const int before = browser()->verticalScrollBar()->value();
     const QColor bgBefore = browser()->palette().color(QPalette::Base);
 
-    QAction *theme = actionNamed(QStringLiteral("暗色主題"));
-    QVERIFY(theme);
-    theme->setChecked(true);
+    QAction *black = actionNamed(QStringLiteral("黑色主題"));
+    QAction *white = actionNamed(QStringLiteral("白色主題"));
+    QVERIFY(black && white);
 
+    black->trigger();
     QTRY_VERIFY(browser()->palette().color(QPalette::Base) != bgBefore);
     QCOMPARE(headingBlockCount(), 5);                     // TOC 結構沒掉
     QCOMPARE(tocTree()->topLevelItemCount(), 1);
     QVERIFY2(qAbs(browser()->verticalScrollBar()->value() - before) < 40,
              "切換主題後捲動位置跑掉太多");
 
-    theme->setChecked(false);
+    white->trigger();
     QTRY_COMPARE(browser()->palette().color(QPalette::Base), bgBefore);
+}
+
+void TestE2eViewer::themesAreWhiteAndBlack()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+
+    actionNamed(QStringLiteral("白色主題"))->trigger();
+    QTRY_COMPARE(browser()->palette().color(QPalette::Base), QColor(Qt::white));
+
+    actionNamed(QStringLiteral("黑色主題"))->trigger();
+    QTRY_COMPARE(browser()->palette().color(QPalette::Base), QColor(Qt::black));
+
+    // 切換主題的捷徑動作也要能來回
+    QAction *toggle = actionNamed(QStringLiteral("切換主題"));
+    QVERIFY(toggle);
+    toggle->trigger();
+    QTRY_COMPARE(browser()->palette().color(QPalette::Base), QColor(Qt::white));
+    toggle->trigger();
+    QTRY_COMPARE(browser()->palette().color(QPalette::Base), QColor(Qt::black));
+}
+
+void TestE2eViewer::hardcodedInvisibleColourIsCorrected()
+{
+    // 內嵌原始 HTML 寫死純黑；在黑色主題下必須被改掉，否則就是隱形文字
+    writeFile(QStringLiteral("invisible.md"),
+              QStringLiteral("# 對比\n\n<span style=\"color:#000000\">隱形候選</span>\n"));
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("invisible.md"))));
+    actionNamed(QStringLiteral("黑色主題"))->trigger();
+
+    bool found = false;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid() && !found; b = b.next()) {
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (!f.isValid() || !f.text().contains(QStringLiteral("隱形候選")))
+                continue;
+            found = true;
+            const QColor fg = f.charFormat().foreground().style() != Qt::NoBrush
+                                  ? f.charFormat().foreground().color()
+                                  : QColor(Theme::colors(Theme::Dark).text);
+            const double r = Theme::contrastRatio(fg, QColor(Qt::black));
+            qInfo() << "修正後前景色 =" << fg.name() << " 對比 =" << r;
+            QVERIFY2(r >= Theme::MinTextContrast,
+                     qPrintable(QStringLiteral("寫死的 #000000 沒被修正，對比只有 %1:1").arg(r)));
+        }
+    }
+    QVERIFY2(found, "找不到那段文字");
+}
+
+// ------------------------------------------------------------------ 路徑列
+
+void TestE2eViewer::pathBarShowsCurrentFile()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    PathBar *bar = m_win->findChild<PathBar *>();
+    QVERIFY(bar);
+    QCOMPARE(bar->path(), fixturePath(QStringLiteral("main.md")));
+    QCOMPARE(bar->findChild<QLineEdit *>()->text(), fixturePath(QStringLiteral("main.md")));
+}
+
+void TestE2eViewer::pathBarOpensTypedFile()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    PathBar *bar = m_win->findChild<PathBar *>();
+    QVERIFY(bar);
+
+    QLineEdit *edit = bar->findChild<QLineEdit *>();
+    QVERIFY(edit);
+    edit->setText(fixturePath(QStringLiteral("other.md")));
+    QTest::keyClick(edit, Qt::Key_Return);
+
+    QTRY_VERIFY2(m_win->windowTitle().startsWith(QStringLiteral("另一份文件")),
+                 qPrintable(m_win->windowTitle()));
+    // 開檔後路徑列要跟著更新
+    QCOMPARE(bar->path(), fixturePath(QStringLiteral("other.md")));
+}
+
+void TestE2eViewer::pathBarSwitchesFolderWhenGivenDirectory()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    QVERIFY(QDir().mkpath(m_dir->path() + QStringLiteral("/sub")));
+    writeFile(QStringLiteral("sub/inner.md"), QStringLiteral("# 子目錄文件\n"));
+
+    PathBar *bar = m_win->findChild<PathBar *>();
+    QLineEdit *edit = bar->findChild<QLineEdit *>();
+    edit->setText(m_dir->path() + QStringLiteral("/sub"));
+    QTest::keyClick(edit, Qt::Key_Return);
+
+    // 應切到「檔案」分頁並換根，而不是嘗試把資料夾當 markdown 開
+    QTRY_COMPARE(sidebar()->currentIndex(), 1);
+    auto *model = qobject_cast<QFileSystemModel *>(fileTree()->model());
+    QTRY_COMPARE(model->filePath(fileTree()->rootIndex()),
+                 QFileInfo(m_dir->path() + QStringLiteral("/sub")).absoluteFilePath());
+    // 原本的文件沒被關掉
+    QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
+}
+
+void TestE2eViewer::pathBarReportsMissingPathWithoutCrashing()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    const QString titleBefore = m_win->windowTitle();
+
+    PathBar *bar = m_win->findChild<PathBar *>();
+    QLineEdit *edit = bar->findChild<QLineEdit *>();
+    edit->setText(m_dir->path() + QStringLiteral("/nope-does-not-exist.md"));
+    QTest::keyClick(edit, Qt::Key_Return);
+
+    QTRY_VERIFY(m_win->statusBar()->currentMessage().contains(QStringLiteral("路徑不存在")));
+    QCOMPARE(m_win->windowTitle(), titleBefore);   // 沒換掉目前文件
+}
+
+void TestE2eViewer::pathBarExpandsTildeAndRelativePaths()
+{
+    // 純邏輯，不需要真的開檔
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("~"), QString()), QDir::homePath());
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("~/x.md"), QString()),
+             QDir::homePath() + QStringLiteral("/x.md"));
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("other.md"), QStringLiteral("/tmp/base")),
+             QStringLiteral("/tmp/base/other.md"));
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("../up.md"), QStringLiteral("/tmp/base/sub")),
+             QStringLiteral("/tmp/base/up.md"));
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("  /abs/path.md  "), QStringLiteral("/tmp")),
+             QStringLiteral("/abs/path.md"));
+    QCOMPARE(PathBar::resolveInput(QStringLiteral("file:///tmp/x.md"), QString()),
+             QStringLiteral("/tmp/x.md"));
+    QVERIFY(PathBar::resolveInput(QStringLiteral("   "), QStringLiteral("/tmp")).isEmpty());
+}
+
+void TestE2eViewer::ctrlLFocusesPathBar()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    PathBar *bar = m_win->findChild<PathBar *>();
+    QLineEdit *edit = bar->findChild<QLineEdit *>();
+    QVERIFY(!edit->hasFocus());
+
+    QAction *focus = actionNamed(QStringLiteral("聚焦路徑列"));
+    QVERIFY(focus);
+    QCOMPARE(focus->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_L));
+    focus->trigger();
+
+    QTRY_VERIFY2(edit->hasFocus(), "Ctrl+L 沒把焦點給路徑列");
+    QVERIFY2(!edit->selectedText().isEmpty(), "聚焦後沒有全選，覆寫路徑會很麻煩");
+
+    // Esc 還原並把焦點交回內容區
+    edit->setText(QStringLiteral("/tmp/whatever.md"));
+    QTest::keyClick(edit, Qt::Key_Escape);
+    QCOMPARE(edit->text(), fixturePath(QStringLiteral("main.md")));
 }
 
 void TestE2eViewer::zoomChangesFontSizeAndResets()
