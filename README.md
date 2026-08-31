@@ -89,6 +89,8 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 | 表格 | 只有橫線（`borderCollapse` + 每列上框線）、表頭下方加粗、`cellPadding=8` |
 | 巢狀清單 | `setIndentWidth(20)` |
 | 標題字級 | H1→H6 為 23/17/14/12.5/11.5/11pt，正文 11pt；H6 用次要色 |
+| 行高 | 155%（Qt 預設約單行，中文太擠）；程式碼區塊同值 |
+| 段距 | 段落上下各 10px；清單項目 0、清單整體上下 4px |
 
 行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
 「這是程式碼」還是「這是可點的連結」。另外區分也不只靠顏色：連結有底線、
@@ -158,7 +160,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-102 個測試函式、7 個套件：
+103 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -168,7 +170,7 @@ ctest --test-dir build --output-on-failure
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
-| e2e_regression | 24 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_regression | 25 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。

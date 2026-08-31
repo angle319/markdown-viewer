@@ -470,3 +470,57 @@ Qt 就完全忽略 `FontPointSize`，改用「預設字級 × 層級係數」。
 
 `dumpScreenshotsIfRequested()` 新增 `MD_E2E_DOC` 與 `MD_E2E_ANCHORS` 兩個環境變數，
 可以針對任意文件與段落產生兩個主題的截圖。標題層級這一輪就是靠它反覆重現檢查的。
+
+## 16. 逐項對照 Chrome extension（2026-08-31）
+
+第二次開 Chrome 抓 computed style，這次把 `sample.md` 與 `headings.md` 都跑過，
+逐項列出「已達到／較差／刻意不同」。
+
+### 16.1 抓到的基準
+
+extension（body 16px）：
+
+| 元素 | 值 |
+|---|---|
+| h1..h6 | 32 / 24 / 20 / 16 / 14 / 13px（= 2.00 / 1.50 / 1.25 / 1.00 / 0.875 / 0.8125 × body）|
+| p | line-height 24px（1.5）、margin 25/16px |
+| li | line-height 24px、margin-top 0 |
+| pre code | line-height 22.5px（1.6）、padding 10.7/16px、radius 6px |
+| td | line-height 24px、padding 9.6/16px |
+| blockquote p | line-height 24px、margin 0/10px |
+| 內容欄寬 | 1200px |
+
+### 16.2 較差、已修
+
+1. **完全沒設行高。** Qt 預設約等於單行，中文在那個行距下很擠 —— 這是兩邊
+   可讀性差距最大的一項。改為 155%（`Typography::LineHeightPercent`）。
+   實測確認 Qt 的 CSS 確實支援 `line-height`（`lineHeightType` 為
+   `ProportionalHeight`），不是所有 CSS 屬性都有這個待遇。
+2. **段距太緊**（7/7px）。改為 10/10px。
+3. **程式碼區塊沒有行高、內距偏小。** 補上同樣的 155% 與 10px。
+4. 補完行高後**清單變太鬆**（相鄰項目 28.9px，extension 是 24px）。
+   把 `li` 上下邊距設為 0、清單整體 4px 收回來。
+
+行高數值一開始分別寫在 Theme 與 CodeHighlighter 兩處，結果正文 155%、
+程式碼區塊 150%，是測試抓到的。已抽成 `src/core/Typography.h` ——
+放在 core 是因為 CodeHighlighter 在 mdcore（只依賴 QtCore）而 Theme 在 mdgui。
+
+### 16.3 已達到或更好
+
+| 項目 | 說明 |
+|---|---|
+| 行內 code | 兩邊都有色 + 底色；**本專案另外與連結色相分離**（extension 兩者同色，分不出程式碼與連結）|
+| 連結底線 | 本專案有；extension 內文的 `a` 實測是 `text-decoration: none`（先前量到的 underline 是側邊欄目錄裡的連結，是我取樣取錯）|
+| 標題級距 | 比例相近（本專案 2.09/1.55/1.27/1.14/1.05/1.00 × body）|
+| H1 分隔線 | 本專案有，extension 只有 H2 |
+| mermaid | 兩邊都能顯示；本專案是預先算好的 PNG 快取，捲動不重排 |
+
+### 16.4 刻意不同或 Qt 限制
+
+| 項目 | 說明 |
+|---|---|
+| H5/H6 字級 | extension 讓它們小於正文（0.875/0.8125×），本專案維持 ≥ 正文，改用粗體與次要色區分 |
+| 內容欄寬 | 980px（沿用 Okular 的 CONTENT_WIDTH）vs 1200px |
+| 行內 code 圓角 | Qt rich-text 不支援 `border-radius`，是方角 |
+| 待辦核取方塊 | Qt 不渲染 `<input type=checkbox>`，用 ☑/☐ 字元 |
+| 清單間距 | 28.9px vs 24px，Qt 對 li 的 leading 處理不同，已收到可接受範圍 |

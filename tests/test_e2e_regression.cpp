@@ -8,6 +8,7 @@
 #include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextDocument>
+#include <QAbstractTextDocumentLayout>
 #include <QTextFrame>
 #include <QTextTable>
 #include <QTextTableCell>
@@ -65,6 +66,7 @@ private slots:
     void blockquoteMarkerContractHolds();
     void tableUsesHorizontalRulesOnly();
     void headingSizesFollowThemeScale();
+    void bodyTextUsesComfortableLineHeight();
     void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
@@ -572,6 +574,30 @@ void TestE2eRegression::headingSizesFollowThemeScale()
                             .arg(seen.value(6)).arg(Theme::BodyPointSize)));
 
     QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
+}
+
+void TestE2eRegression::bodyTextUsesComfortableLineHeight()
+{
+    // Qt 預設的行距約等於單行，中文在那個行距下很擠。對照 Chrome extension 是
+    // 1.5（16px 字對 24px 行高），這裡用 155%。
+    // 順帶確認 Qt 真的吃 CSS 的 line-height —— 它不是 Qt rich-text 一定支援的屬性。
+    int checked = 0;
+    const QTextDocument *doc = browser()->document();
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
+        if (b.text().trimmed().isEmpty() || b.blockFormat().headingLevel() > 0)
+            continue;
+        const QTextBlockFormat bf = b.blockFormat();
+        if (qFuzzyIsNull(bf.lineHeight()) && bf.lineHeightType() == QTextBlockFormat::SingleHeight)
+            continue;   // 表格內的空 cell 之類
+
+        QCOMPARE(bf.lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+        QCOMPARE(bf.lineHeight(), Theme::LineHeightPercent);
+        ++checked;
+    }
+    QVERIFY2(checked >= 10,
+             qPrintable(QStringLiteral("只有 %1 個 block 套到行高，語料可能有問題")
+                            .arg(checked)));
+    qInfo() << "套用行高的 block 數 =" << checked;
 }
 
 void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()

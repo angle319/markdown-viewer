@@ -1,5 +1,7 @@
 #include "core/CodeHighlighter.h"
 
+#include "core/Typography.h"
+
 #include <QHash>
 #include <QSet>
 #include <QStringList>
@@ -263,7 +265,10 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
         }
     }
 
-    return QStringLiteral("<pre style=\"background-color:%1; color:%2; padding:8px; "
-                          "font-family:monospace;\">%3</pre>")
-        .arg(pal.preBg, pal.preFg, body);
+    // 行高與內距對照 Chrome extension（行高 1.6、內距約 11px/16px）。
+    // Qt 支援 <pre> 上的 line-height 與 padding，實測有生效。
+    return QStringLiteral("<pre style=\"background-color:%1; color:%2; padding:10px; "
+                          "line-height:%4%; font-family:monospace;\">%3</pre>")
+        .arg(pal.preBg, pal.preFg, body)
+        .arg(int(Typography::LineHeightPercent));
 }

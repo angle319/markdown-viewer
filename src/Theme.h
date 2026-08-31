@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Typography.h"
+
 #include <QColor>
 #include <QPalette>
 #include <QString>
@@ -66,8 +68,9 @@ public:
 
     static QString name(Mode m);
 
-    /// 正文字級（pt）。明確給值，否則各標題層級與正文的相對大小會隨系統字型漂移。
-    static constexpr qreal BodyPointSize = 11.0;
+    /// 見 Typography —— 這兩個值 CodeHighlighter 也要用，所以定義在 core。
+    static constexpr qreal BodyPointSize = Typography::BodyPointSize;
+    static constexpr qreal LineHeightPercent = Typography::LineHeightPercent;
 
     /// 標題字級（pt），level 為 1..6。
     ///

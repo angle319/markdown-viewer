@@ -74,14 +74,20 @@ QString Theme::documentStyleSheet(Mode m)
     // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
     // （例如 %4）就會讓其後全部錯位 —— 這個坑真的踩過，害 code 的底色拿到前景色。
     QString css = QStringLiteral(R"(
-        body { color: @TEXT@; background-color: @BG@; font-size: @BODYPT@pt; }
+        body { color: @TEXT@; background-color: @BG@; font-size: @BODYPT@pt;
+               line-height: @LH@%; }
         h1 { margin-top: 24px; margin-bottom: 12px; color: @TEXT@; }
         h2 { margin-top: 28px; margin-bottom: 12px; color: @TEXT@; }
         h3 { margin-top: 24px; margin-bottom: 8px; color: @TEXT@; }
         h4 { margin-top: 20px; margin-bottom: 6px; color: @TEXT@; }
         h5 { margin-top: 18px; margin-bottom: 6px; color: @TEXT@; }
         h6 { margin-top: 18px; margin-bottom: 6px; color: @MUTED@; }
-        p  { margin-top: 7px; margin-bottom: 7px; }
+        p  { margin-top: 10px; margin-bottom: 10px; line-height: @LH@%; }
+        ul { margin-top: 4px; margin-bottom: 4px; }
+        ol { margin-top: 4px; margin-bottom: 4px; }
+        li { line-height: @LH@%; margin-top: 0px; margin-bottom: 0px; }
+        td { line-height: @LH@%; }
+        th { line-height: @LH@%; }
         a  { color: @LINK@; text-decoration: underline; }
         code { color: @CODE_FG@; background-color: @CODE_BG@; font-family: monospace; }
         blockquote { color: @MUTED@; margin-left: @BQ@px; margin-top: 8px; margin-bottom: 8px; }
@@ -101,6 +107,7 @@ QString Theme::documentStyleSheet(Mode m)
         { QStringLiteral("@CODE_BG@"), c.codeInlineBackground },
         { QStringLiteral("@BQ@"), QString::number(BlockquoteIndentPx) },
         { QStringLiteral("@BODYPT@"), QString::number(BodyPointSize) },
+        { QStringLiteral("@LH@"), QString::number(int(LineHeightPercent)) },
     };
     for (const auto &t : tokens)
         css.replace(t.first, t.second);
