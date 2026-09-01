@@ -20,6 +20,13 @@
 
 // ---------------------------------------------------------------- PaneTabBar
 
+QSize PaneTabBar::tabSizeHint(int index) const
+{
+    QSize hint = QTabBar::tabSizeHint(index);
+    hint.setWidth(qBound(MinTabWidth, hint.width(), MaxTabWidth));
+    return hint;
+}
+
 void PaneTabBar::mousePressEvent(QMouseEvent *e)
 {
     if (e->button() == Qt::LeftButton) {
@@ -32,8 +39,9 @@ void PaneTabBar::mousePressEvent(QMouseEvent *e)
 
 void PaneTabBar::mouseMoveEvent(QMouseEvent *e)
 {
-    // 只有在游標「垂直離開分頁列」時才接手，否則交給 QTabBar 內建的同列重排。
-    // 用垂直距離判斷是刻意的：水平移動代表使用者想在同一列裡調順序。
+    // Only take over once the cursor leaves the bar *vertically*; otherwise let
+    // QTabBar do its own within-bar reordering. Using vertical distance is
+    // deliberate: horizontal movement means the user wants to reorder.
     const bool leftBarVertically =
         e->pos().y() < -8 || e->pos().y() > height() + 8;
     const bool farEnough =
@@ -62,7 +70,7 @@ void PaneTabBar::mouseMoveEvent(QMouseEvent *e)
 
 PaneGroup::DropZone PaneGroup::zoneFor(const QRect &paneRect, const QPoint &pos)
 {
-    // 左右各 25% 是「在該側分割」，中間是「移入這一格」
+    // The outer 25% on each side splits on that side; the middle merges in
     const int edge = qMax(40, paneRect.width() / 4);
     if (pos.x() < paneRect.left() + edge)
         return DropZone::SplitLeft;
@@ -102,7 +110,7 @@ PaneGroup::PaneGroup(QWidget *parent)
     connect(m_tabBar, &QTabBar::tabBarClicked, this, [this](int) { Q_EMIT activated(); });
     connect(m_tabBar, &QTabBar::tabCloseRequested, this, &PaneGroup::closeRequested);
     connect(m_tabBar, &QTabBar::tabMoved, this, [this](int from, int to) {
-        // 分頁列的順序是唯一真實來源，堆疊要跟著搬
+        // The tab bar's order is the single source of truth; move the stack too
         QWidget *w = m_stack->widget(from);
         m_stack->removeWidget(w);
         m_stack->insertWidget(to, w);
@@ -123,7 +131,7 @@ PaneGroup::PaneGroup(QWidget *parent)
 
     m_dropHint = new QRubberBand(QRubberBand::Rectangle, this);
     setAcceptDrops(true);
-    // 擠到比這更窄，表格與行內 code 會被逼到逐字換行
+    // Narrower than this and tables and inline code wrap one character per line
     setMinimumWidth(240);
     installEventFilter(this);
 }
@@ -183,7 +191,7 @@ void PaneGroup::dropEvent(QDropEvent *e)
 
 bool PaneGroup::eventFilter(QObject *obj, QEvent *event)
 {
-    // 在面板任何地方按下滑鼠都算「使用這一格」
+    // A press anywhere in the pane counts as using it
     if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::FocusIn)
         Q_EMIT activated();
     return QWidget::eventFilter(obj, event);

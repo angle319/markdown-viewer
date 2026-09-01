@@ -9,17 +9,19 @@
 class MermaidCache;
 class MdTextBrowser;
 
-/// 以 QTextBrowser（QTextDocument 富文字引擎）顯示。無瀏覽器引擎、無 JS。
+/// Displays a document with QTextBrowser (Qt's QTextDocument rich-text engine).
+/// No browser engine, no JavaScript.
 ///
-/// mermaid 圖以 <img src="mermaid://<sha1>"> 佔位，實際內容由覆寫的
-/// loadResource() 從 MermaidCache 取；還沒畫好時先給一張「產生中」的佔位圖，
-/// 畫好後由 mermaidReady() 換掉並重新排版。
+/// Mermaid diagrams are placeholders of the form <img src="mermaid://<sha1>">.
+/// The overridden loadResource() fetches the real image from MermaidCache, or
+/// returns a "rendering" placeholder while it is still being produced;
+/// mermaidReady() then swaps it in and re-lays out.
 class TextBrowserBackend : public IRenderBackend
 {
     Q_OBJECT
 
 public:
-    /// @param cache 不取得所有權
+    /// @param cache Not owned
     explicit TextBrowserBackend(MermaidCache *cache, QObject *parent = nullptr);
     ~TextBrowserBackend() override;
 
@@ -38,7 +40,7 @@ public:
     void zoomOut() override;
     void resetZoom() override;
 
-    /// 縮放倍率。1.0 為原始大小。
+    /// Zoom factor. 1.0 is the original size.
     void setZoom(qreal factor);
     qreal zoom() const { return m_zoom; }
 

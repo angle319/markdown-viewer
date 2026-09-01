@@ -8,7 +8,8 @@
 class QTreeWidget;
 class QTreeWidgetItem;
 
-/// 側邊欄「段落」分頁：標題樹，可點擊跳轉，並隨捲動高亮目前位置。
+/// The sidebar's Paragraphs tab: a heading tree that scrolls the document on
+/// click and highlights the heading currently at the top of the viewport.
 class TocPanel : public QWidget
 {
     Q_OBJECT
@@ -17,7 +18,7 @@ public:
     explicit TocPanel(QWidget *parent = nullptr);
 
     void setToc(const QVector<TocEntry> &toc);
-    /// 由後端的捲動同步呼叫；index 為 Document::toc 索引，-1 表示清除高亮。
+    /// Called as the backend scrolls. `index` is into Document::toc; -1 clears.
     void highlightIndex(int index);
 
 Q_SIGNALS:
@@ -25,6 +26,6 @@ Q_SIGNALS:
 
 private:
     QTreeWidget *m_tree = nullptr;
-    QVector<QTreeWidgetItem *> m_items;   ///< toc 索引 → item
+    QVector<QTreeWidgetItem *> m_items;   ///< toc index -> item
     bool m_suppress = false;
 };

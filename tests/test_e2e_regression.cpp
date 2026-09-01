@@ -28,14 +28,18 @@
 #  error "HEADINGS_MD 未定義（應由 CMake 提供 docs/headings.md 的路徑）"
 #endif
 
-/// 回歸測試：拿 docs/sample.md 當語法語料庫，把整條 pipeline 的不變式釘住。
+/// Regression suite: uses docs/sample.md as a syntax corpus and pins the
+/// invariants of the whole pipeline.
 ///
-/// 分成兩層：
-///   1. 解析層 —— 直接檢查 MarkdownParser 的產出（錨點、mermaid、轉義…）
-///   2. 呈現層 —— 檢查 QTextDocument 真的收下了那些結構（標題、表格、程式碼…）
+/// Two layers:
+///   1. Parsing — checks MarkdownParser's output directly (anchors, mermaid,
+///      escaping, ...)
+///   2. Presentation — checks that QTextDocument actually kept those structures
+///      (headings, tables, code, ...)
 ///
-/// 第 2 層存在的理由是第 1 層過不代表畫面對：Qt rich-text 只吃 HTML 的一個子集，
-/// 「產出了正確的 HTML」與「Qt 保留了那個結構」是兩件事。
+/// Layer 2 exists because layer 1 passing does not mean the screen is right: Qt
+/// rich text accepts only a subset of HTML, so "emitted correct HTML" and "Qt
+/// preserved that structure" are two different claims.
 class TestE2eRegression : public QObject
 {
     Q_OBJECT
@@ -44,7 +48,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
 
-    // --- 解析層 ---
+    // --- Parsing layer ---
     void sampleFileExists();
     void tocAnchorsMatchGolden();
     void duplicateHeadingsGetGithubStyleSuffixes();
@@ -52,7 +56,7 @@ private slots:
     void rawHtmlIsEscapedInsideCodeBlocks();
     void unsupportedTagsAreRewritten();
 
-    // --- 呈現層 ---
+    // --- Presentation layer ---
     void headingBlocksSurviveQtHtmlParser();
     void tableSurvivesAsQTextTable();
     void codeBlocksKeepMonospaceAndPreserveWhitespace();
@@ -62,7 +66,7 @@ private slots:
     void everyImageFragmentHasPositiveSize();
     void contentColumnIsCappedAndCentred();
 
-    // --- 狀態切換不破壞不變式 ---
+    // --- State changes preserve the invariants ---
     void themeRoundTripPreservesStructure();
     void reloadPreservesStructure();
     void inlineCodeIsVisuallyDistinct();
@@ -78,22 +82,24 @@ private slots:
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
 
-    // --- 可選的視覺輸出 ---
+    // --- Optional visual output ---
     void dumpScreenshotsIfRequested();
 
 private:
     QTextBrowser *browser() const
     {
-        // 多分頁之後不能用 m_win->findChild —— 那會抓到第一個建立的 view，
-        // 不一定是作用中的那個
+        // With tabs, m_win->findChild is wrong: it returns the first view ever
+        // created, which is not necessarily the active one
         DocumentView *v = m_win->activeView();
         return v ? v->findChild<QTextBrowser *>() : nullptr;
     }
     QAction *actionNamed(const QString &text) const;
     int headingBlockCount() const;
 
-    /// 掃全文件，回傳「對比不足的文字片段」清單（片段文字 + 前景 + 背景 + 比值）。
-    /// 有效背景的判定順序與 render backend 一致：片段背景 → block 背景 → 頁面底色。
+    /// Scans the document and returns every text fragment with insufficient
+    /// contrast (text, foreground, background and ratio). The effective
+    /// background is resolved the same way the render backend does it:
+    /// fragment background, then block background, then the page colour.
     QStringList lowContrastFragments(Theme::Mode mode) const;
     int tableCount() const;
 
@@ -200,7 +206,7 @@ int TestE2eRegression::tableCount() const
     return n;
 }
 
-// ------------------------------------------------------------------ 解析層
+// ------------------------------------------------------------ Parsing layer
 
 void TestE2eRegression::sampleFileExists()
 {
@@ -210,7 +216,8 @@ void TestE2eRegression::sampleFileExists()
 
 void TestE2eRegression::tocAnchorsMatchGolden()
 {
-    // 錨點是對外契約（複製貼上的連結會用到），變動必須是刻意的
+    // Anchors are an external contract — copied links rely on them — so any
+    // change must be deliberate
     const QStringList golden{
         QStringLiteral("markdown-tool-驗證文件"),
         QStringLiteral("行內樣式"),
@@ -257,7 +264,7 @@ void TestE2eRegression::mermaidBlocksAreExtracted()
         QCOMPARE(b.key.size(), 40);   // sha1 hex
         QVERIFY(m_doc.html.contains(QStringLiteral("<img src=\"mermaid://%1\"").arg(b.key)));
     }
-    // mermaid 原始碼不該同時以程式碼區塊留在 HTML 裡
+    // The mermaid source must not also survive as a code block
     QVERIFY(!m_doc.html.contains(QStringLiteral("sequenceDiagram")));
 }
 
@@ -277,11 +284,11 @@ void TestE2eRegression::unsupportedTagsAreRewritten()
     QVERIFY(m_doc.html.contains(QString::fromUtf8("\xE2\x98\x90")));   // ☐
 }
 
-// ------------------------------------------------------------------ 呈現層
+// ------------------------------------------------------- Presentation layer
 
 void TestE2eRegression::headingBlocksSurviveQtHtmlParser()
 {
-    // 捲動同步完全依賴這件事成立
+    // Scroll synchronisation depends entirely on this holding
     QCOMPARE(headingBlockCount(), m_doc.toc.size());
 }
 
@@ -308,12 +315,12 @@ void TestE2eRegression::codeBlocksKeepMonospaceAndPreserveWhitespace()
     QVERIFY2(plain.contains(QStringLiteral("template <typename T>")), "C++ 區塊內容不見了");
     QVERIFY2(plain.contains(QStringLiteral("def slug(text: str) -> str:")), "Python 區塊不見了");
 
-    // 縮排必須保留（<pre> 的意義）
+    // Indentation must survive; that is what <pre> means
     QVERIFY2(plain.contains(QStringLiteral("    return \"-\".join")), "程式碼縮排被吃掉");
 
-    // 程式碼片段必須套上等寬字族。
-    // 註：Qt 不會因為 CSS 的 font-family 去設 fontFixedPitch —— 那是獨立旗標，
-    // 所以這裡驗的是字型家族，而不是那個旗標。
+    // Code fragments must carry a monospace family.
+    // Note: Qt does not set fontFixedPitch from a CSS font-family — that is a
+    // separate flag — so this checks the family, not the flag.
     int monoFragments = 0;
     const QTextDocument *doc = browser()->document();
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -368,20 +375,22 @@ void TestE2eRegression::everyImageFragmentHasPositiveSize()
                                     .arg(fmt.name()).arg(fmt.width())));
         }
     }
-    // 兩張 mermaid（缺少的那張圖已被換成文字，所以不算）
+    // Two mermaid diagrams; the missing image was replaced by text so it does
+    // not count
     QCOMPARE(images, 2);
 }
 
 void TestE2eRegression::contentColumnIsCappedAndCentred()
 {
-    // 視窗 1400 寬，內容欄應被限制在 980 附近並置中（靠 viewport margin）
+    // In a 1400 px window the content column should be capped near 980 and
+    // centred, via viewport margins
     QVERIFY(m_win->width() >= 1300);
     const int vw = browser()->viewport()->width();
     qInfo() << "視窗寬" << m_win->width() << " 內容視埠寬" << vw;
     QVERIFY2(vw <= 990, qPrintable(QStringLiteral("內容欄沒被限制寬度: %1").arg(vw)));
 }
 
-// -------------------------------------------------------- 狀態切換不變式
+// ------------------------------------------ Invariants across state changes
 
 void TestE2eRegression::themeRoundTripPreservesStructure()
 {
@@ -416,7 +425,8 @@ void TestE2eRegression::reloadPreservesStructure()
 
 void TestE2eRegression::inlineCodeIsVisuallyDistinct()
 {
-    // 行內 `code` 必須有自己的顏色與底色，跟正文一眼分得出來。
+    // Inline `code` must have its own colour and background so it is instantly
+    // distinguishable from body text.
     for (Theme::Mode m : { Theme::Light, Theme::Dark }) {
         actionNamed(Theme::name(m))->trigger();
 
@@ -450,9 +460,11 @@ void TestE2eRegression::inlineCodeIsVisuallyDistinct()
                 QVERIFY2(fg != bodyText,
                          qPrintable(QStringLiteral("行內 code 的顏色與正文相同: %1").arg(fg.name())));
 
-                // 斷言「確切等於主題定義的顏色」。原本只驗「與正文不同」，
-                // 結果 CSS placeholder 錯位（底色拿到前景色）時測試照樣通過 ——
-                // 因為對比修正把前景改成了可讀的白色。寬鬆的斷言會掩蓋 bug。
+                // Assert the *exact* theme colours. The earlier version only
+                // checked "different from body text", and still passed when a
+                // CSS placeholder shift gave the background the foreground
+                // colour — because the contrast fixup then rewrote the
+                // foreground to something readable. Loose assertions hide bugs.
                 QCOMPARE(fg, QColor(Theme::colors(m).codeInline));
                 QCOMPARE(bg, QColor(Theme::colors(m).codeInlineBackground));
                 QVERIFY2(Theme::contrastRatio(fg, bg) >= Theme::MinTextContrast,
@@ -470,9 +482,10 @@ void TestE2eRegression::inlineCodeIsVisuallyDistinct()
 
 void TestE2eRegression::blockquoteMarkerContractHolds()
 {
-    // Qt rich-text 沒有 block 層級的 border，所以引用區塊的左色條是自繪的，
-    // 而「哪些 block 是引用區塊」靠 leftMargin == Theme::BlockquoteIndentPx 辨識。
-    // 這支測試釘住那個契約：CSS 與繪製程式碼共用同一個常數。
+    // Qt rich text has no block-level border, so the blockquote bar is painted
+    // by hand and "which blocks are blockquotes" is decided by
+    // leftMargin == Theme::BlockquoteIndentPx. This pins that contract: the
+    // stylesheet and the painting code share one constant.
     int quoteBlocks = 0;
     int headingBlocks = 0;
     const QTextDocument *doc = browser()->document();
@@ -495,9 +508,10 @@ void TestE2eRegression::blockquoteMarkerContractHolds()
 
 void TestE2eRegression::tableUsesHorizontalRulesOnly()
 {
-    // 表格改成只有橫線（對照 Chrome extension 的觀感）。
-    // 用 Qt 原生的 borderCollapse + 每個 cell 的邊框，不是自繪 ——
-    // 少了 borderCollapse(true) 這行 Qt 根本不會畫 cell 層級的邊框。
+    // Tables use horizontal rules only, matching the Chrome extension's look.
+    // This relies on Qt's native borderCollapse plus per-cell borders rather
+    // than custom painting — without borderCollapse(true) Qt draws no cell
+    // borders at all.
     QTextTable *table = nullptr;
     for (QTextFrame *child : browser()->document()->rootFrame()->childFrames())
         if (auto *t = qobject_cast<QTextTable *>(child))
@@ -530,7 +544,7 @@ void TestE2eRegression::tableUsesHorizontalRulesOnly()
         }
     }
 
-    // 最後一列要有下框線把表格收尾
+    // The last row needs a bottom border to close the table off
     const QTextTableCellFormat lastCell =
         table->cellAt(rows - 1, 0).format().toTableCellFormat();
     QVERIFY(lastCell.bottomBorder() >= 1.0);
@@ -538,10 +552,12 @@ void TestE2eRegression::tableUsesHorizontalRulesOnly()
 
 void TestE2eRegression::headingSizesFollowThemeScale()
 {
-    // 這支測試盯住一個 Qt 的陷阱：QTextFormat::FontSizeAdjustment 只要存在
-    // （即使值是 0），Qt 就完全忽略 FontPointSize，改用「預設字級 × 層級係數」。
-    // 實測 H1 設 23pt 卻畫成 18pt、H5 設 11.5pt 卻畫成 7.2pt —— 比正文還小。
-    // 修法是在 applyHeadingScale() 裡 clearProperty() 掉它（設成 0 沒有用）。
+    // Guards a Qt trap: while QTextFormat::FontSizeAdjustment is present — even
+    // set to 0 — Qt ignores FontPointSize entirely and uses
+    // "default size x level factor". Measured, H1 set to 23pt drew at 18pt and
+    // H5 set to 11.5pt drew at 7.2pt, smaller than body text.
+    // The fix is clearProperty() in applyHeadingScale(); setting it to 0 does
+    // nothing.
     QVERIFY2(m_win->openFile(QString::fromUtf8(HEADINGS_MD)), HEADINGS_MD);
 
     QMap<int, qreal> seen;
@@ -571,12 +587,13 @@ void TestE2eRegression::headingSizesFollowThemeScale()
         }
     }
 
-    // headings.md 必須真的涵蓋六個層級，否則這支測試等於沒驗
+    // headings.md must really cover all six levels, or this verifies nothing
     for (int level = 1; level <= 6; ++level)
         QVERIFY2(seen.contains(level),
                  qPrintable(QStringLiteral("語料裡沒有 H%1").arg(level)));
 
-    // 階層必須是嚴格遞減的，而且最深的一層不能小於正文
+    // The scale must decrease strictly, and the deepest level must not be
+    // smaller than body text
     for (int level = 1; level < 6; ++level)
         QVERIFY2(seen.value(level) > seen.value(level + 1),
                  qPrintable(QStringLiteral("H%1 (%2pt) 沒有大於 H%3 (%4pt)")
@@ -591,9 +608,10 @@ void TestE2eRegression::headingSizesFollowThemeScale()
 
 void TestE2eRegression::bodyTextUsesComfortableLineHeight()
 {
-    // Qt 預設的行距約等於單行，中文在那個行距下很擠。對照 Chrome extension 是
-    // 1.5（16px 字對 24px 行高），這裡用 155%。
-    // 順帶確認 Qt 真的吃 CSS 的 line-height —— 它不是 Qt rich-text 一定支援的屬性。
+    // Qt's default is roughly single spacing, which is cramped for CJK text.
+    // The Chrome extension uses 1.5 (24px on a 16px font); this uses 155%.
+    // It also confirms Qt honours CSS line-height at all — not every property
+    // in Qt's rich-text subset does.
     int checked = 0;
     const QTextDocument *doc = browser()->document();
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next()) {
@@ -615,11 +633,12 @@ void TestE2eRegression::bodyTextUsesComfortableLineHeight()
 
 void TestE2eRegression::wideTableOpensQuickly()
 {
-    // 曾經的退化：一份 6.9KB、只有 72 行但含 65 列表格的文件要花 2146ms 開，
-    // 而 sample.md 只要 9ms。原因是 document tree walk 每改一個 cell / 片段
-    // 就觸發一次重新排版，在 cell 數多時是二次方級的成本。
-    // 修法是把每個 walk 的修改包進單一 editBlock，並關掉 undo stack。
-    // 修完是 23ms（93 倍）。這支測試守住那個修法別被改掉。
+    // A regression that actually happened: a 6.9 KB, 72-line file containing a
+    // 65-row table took 2146 ms to open while sample.md took 9 ms. Each document
+    // tree walk triggered a full re-layout per cell or fragment, which is
+    // quadratic in the cell count. The fix was to wrap each walk's mutations in
+    // one edit block and disable the undo stack, taking it to 23 ms — 93x.
+    // This test keeps that fix from being undone.
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
@@ -643,7 +662,8 @@ void TestE2eRegression::wideTableOpensQuickly()
     QVERIFY(m_win->openFile(path));
     const qint64 ms = timer.elapsed();
 
-    // 確認語料真的產生了那麼多 cell，否則這支測試等於沒驗
+    // Confirm the corpus really produced that many cells, or this verifies
+    // nothing
     int cells = 0;
     for (QTextFrame *fr : browser()->document()->rootFrame()->childFrames())
         if (auto *t = qobject_cast<QTextTable *>(fr))
@@ -652,8 +672,9 @@ void TestE2eRegression::wideTableOpensQuickly()
 
     qInfo() << "寬表格" << cells << "個 cell 開檔耗時" << ms << "ms";
 
-    // 門檻放寬到 1500ms：這是「別再退回二次方」的哨兵，不是效能基準。
-    // 退化前光 325 個 cell 就要 2146ms，這裡的 cell 數是它的 4.6 倍。
+    // The 1500 ms bound is a sentinel against going quadratic again, not a
+    // performance benchmark. Before the fix, 325 cells alone took 2146 ms, and
+    // this corpus has 4.6 times as many.
     QVERIFY2(ms < 1500,
              qPrintable(QStringLiteral("%1 個 cell 花了 %2ms，可能又退回逐項重排")
                             .arg(cells).arg(ms)));
@@ -661,7 +682,7 @@ void TestE2eRegression::wideTableOpensQuickly()
     QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
 }
 
-/// 找出含有某段文字的片段的實際字級（-1 表示找不到）
+/// Actual point size of the fragment containing a given text (-1 if absent)
 static qreal fragmentPointSize(const QTextDocument *doc, const QString &needle)
 {
     for (QTextBlock b = doc->begin(); b.isValid(); b = b.next())
@@ -675,11 +696,13 @@ static qreal fragmentPointSize(const QTextDocument *doc, const QString &needle)
 
 void TestE2eRegression::zoomScalesBodyAndHeadingsTogether()
 {
-    // 使用者要 Ctrl+/Ctrl- 縮放字型。實測發現原本的實作有兩個問題：
-    //  1. 標題完全不縮放 —— applyHeadingScale() 寫死了 pointSize
-    //  2. 內文其實是 widget 的系統預設字級（9pt），stylesheet 的
-    //     `body { font-size }` 根本沒生效
-    // 現在改成自己管縮放倍率 + setDefaultFont，兩者都會等比變化。
+    // The request was Ctrl+/Ctrl- to zoom the font. Measurement found two
+    // problems with the original implementation:
+    //  1. headings did not scale at all — applyHeadingScale() hard-coded the
+    //     point size
+    //  2. body text was really the widget's system default (9pt); the
+    //     stylesheet's `body { font-size }` had no effect whatsoever
+    // Zoom is now an explicit factor plus setDefaultFont, so both scale.
     const QTextDocument *doc = browser()->document();
 
     const qreal bodyBefore = fragmentPointSize(doc, QStringLiteral("這份文件刻意"));
@@ -701,7 +724,7 @@ void TestE2eRegression::zoomScalesBodyAndHeadingsTogether()
     QVERIFY2(bodyAfter > bodyBefore, "內文沒有放大");
     QVERIFY2(h1After > h1Before, "標題沒有放大 —— 字級被寫死了");
 
-    // 關鍵：兩者要等比，否則放大後版面比例會跑掉
+    // The point: they must scale together, or the proportions break when zoomed
     const double bodyRatio = bodyAfter / bodyBefore;
     const double h1Ratio = h1After / h1Before;
     QVERIFY2(qAbs(bodyRatio - h1Ratio) < 0.02,
@@ -743,8 +766,9 @@ void TestE2eRegression::zoomIsClampedAndResettable()
 
 void TestE2eRegression::zoomShortcutsIncludeCtrlEquals()
 {
-    // 這是使用者實際踩到的：QKeySequence::ZoomIn 在 Linux 上是 Ctrl++，
-    // 而 '+' 一般鍵盤要按 Ctrl+Shift+=，所以按最自然的 Ctrl+= 沒有反應。
+    // What the user actually hit: QKeySequence::ZoomIn is Ctrl++ on Linux, and
+    // '+' needs Ctrl+Shift+= on most keyboards, so the natural Ctrl+= did
+    // nothing.
     const QList<QKeySequence> in = actionNamed(QStringLiteral("放大"))->shortcuts();
     QVERIFY2(in.contains(QKeySequence(Qt::CTRL | Qt::Key_Equal)),
              "放大沒有綁 Ctrl+= —— 一般鍵盤按不到 Ctrl++");
@@ -779,8 +803,9 @@ void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()
 
 void TestE2eRegression::everyTextFragmentIsReadableInBothThemes()
 {
-    // 這是「不要有看不見的狀況」的總體不變式：sample.md 刻意包含寫死顏色的
-    // 原始 HTML，若 render backend 的對比修正沒跑（或漏跑某條路徑），這裡會炸。
+    // The overall "nothing may be invisible" invariant: sample.md deliberately
+    // contains raw HTML with hard-coded colours, so if the backend's contrast
+    // fixup does not run — or misses a path — this fails.
     for (Theme::Mode m : { Theme::Light, Theme::Dark }) {
         actionNamed(Theme::name(m))->trigger();
         QCOMPARE(browser()->palette().color(QPalette::Base),
@@ -799,7 +824,7 @@ void TestE2eRegression::everyTextFragmentIsReadableInBothThemes()
 
 void TestE2eRegression::hardcodedColoursInSampleAreCorrected()
 {
-    // 確認上一支測試不是因為「沒有東西需要修正」而空過
+    // Confirms the previous test did not pass vacuously with nothing to fix
     actionNamed(Theme::name(Theme::Dark))->trigger();
 
     int checked = 0;
@@ -836,16 +861,18 @@ void TestE2eRegression::hardcodedColoursInSampleAreCorrected()
 
 void TestE2eRegression::dumpScreenshotsIfRequested()
 {
-    // 設 MD_E2E_DUMP=<目錄> 時，把幾個關鍵畫面存成 PNG 供人眼檢查。
-    // 自動化斷言驗得了結構，驗不了「看起來對不對」——這條路徑補上那一塊。
+    // With MD_E2E_DUMP=<dir> set, save key screens as PNGs for a human to look
+    // at. Automated assertions verify structure but not whether it *looks*
+    // right; this covers that gap.
     const QString dir = qEnvironmentVariable("MD_E2E_DUMP");
     if (dir.isEmpty())
         QSKIP("未設定 MD_E2E_DUMP，跳過視覺輸出");
 
     QVERIFY(QDir().mkpath(dir));
 
-    // MD_E2E_DOC / MD_E2E_ANCHORS 可以改拍別的文件與別的段落，
-    // 方便針對特定樣式（例如標題層級）重現檢查。
+    // MD_E2E_DOC and MD_E2E_ANCHORS aim the capture at a different document and
+    // sections, which makes checking one specific aspect (heading scale, say)
+    // reproducible.
     const QString altDoc = qEnvironmentVariable("MD_E2E_DOC");
     const QString altAnchors = qEnvironmentVariable("MD_E2E_ANCHORS");
     if (!altDoc.isEmpty()) {
@@ -902,7 +929,7 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
     for (const Shot &sh : shots) {
         actionNamed(Theme::name(sh.dark ? Theme::Dark : Theme::Light))->trigger();
 
-        // 等 mermaid 圖真的畫完再截，否則只會拍到「產生中」的佔位圖
+        // Wait for the diagrams to finish, or the shot only catches placeholders
         QTRY_VERIFY_WITH_TIMEOUT([this] {
             const QTextDocument *doc = browser()->document();
             for (QTextBlock b = doc->begin(); b.isValid(); b = b.next())
@@ -928,7 +955,8 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
 
     actionNamed(Theme::name(Theme::Light))->trigger();
 
-    // 縮放級別：驗證標題與內文等比放大，版面不跑掉
+    // Zoom levels: check headings and body scale together without breaking the
+    // layout
     QAction *zin = actionNamed(QStringLiteral("放大"));
     QAction *zreset = actionNamed(QStringLiteral("原始大小"));
     for (const int steps : { 0, 3, 6 }) {

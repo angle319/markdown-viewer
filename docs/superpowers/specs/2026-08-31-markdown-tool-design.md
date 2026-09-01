@@ -529,7 +529,7 @@ extension（body 16px）：
 
 ### 17.1 2146ms → 23ms
 
-使用者回報開 `edu-confluence-previous-docs/INDEX.md` 很慢。檔案只有 6.9KB、72 行，
+使用者回報開一份索引文件很慢。檔案只有 6.9KB、72 行，
 所以不是大小問題 —— 是那張 **65 列 × 5 欄 = 325 個 cell** 的表格。
 
 量測：

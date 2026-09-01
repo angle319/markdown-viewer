@@ -7,19 +7,22 @@
 
 class IMermaidRenderer;
 
-/// mermaid 圖的磁碟快取 + 序列化的渲染佇列。
+/// On-disk cache for mermaid diagrams, plus a serialised render queue.
 ///
-/// 快取 key = sha1(source + theme + rendererId)：主題進 key 是因為明暗兩種
-/// 主題的產出不同；rendererId 進 key 是因為工具升版後圖形可能改變。
+/// Cache key = sha1(source + theme + rendererId). Theme is part of the key
+/// because light and dark output differ; rendererId is part of it because a
+/// tool upgrade can change the drawing.
 ///
-/// 佇列刻意限制為「同時只跑一個渲染」：mmdc 每次會拉起一個 headless Chromium
-/// （實測峰值約 106MB），一份文件有多張圖時平行跑會把記憶體優勢整個抵銷掉。
+/// The queue deliberately allows only one render at a time: each mmdc run
+/// starts a headless Chromium (measured peak around 106 MB), so rendering a
+/// document's diagrams in parallel would cancel out the memory advantage this
+/// whole design exists for.
 class MermaidCache : public QObject
 {
     Q_OBJECT
 
 public:
-    /// @param renderer 不取得所有權
+    /// @param renderer Not owned
     explicit MermaidCache(IMermaidRenderer *renderer, QObject *parent = nullptr);
 
     void setCacheDir(const QString &dir);
@@ -31,21 +34,21 @@ public:
     bool isCached(const QString &source, bool dark) const;
     bool rendererAvailable() const;
 
-    /// 見 IMermaidRenderer::outputScale()
+    /// See IMermaidRenderer::outputScale()
     qreal outputScale() const;
 
-    /// 已快取或 renderer 不可用時不做事；否則排入佇列。
-    /// 重複請求同一個 key 不會排兩次。
+    /// Does nothing when already cached or the renderer is unavailable;
+    /// otherwise queues a render. Requesting the same key twice queues once.
     void request(const QString &source, bool dark);
 
-    /// 目前佇列長度（含進行中的那一個），供測試與狀態列使用。
+    /// Queue length including the render in flight; used by tests and the status bar.
     int pendingCount() const;
 
 Q_SIGNALS:
-    /// 一張圖畫好了。path 為快取檔案路徑。
+    /// A diagram finished. `path` is the cache file.
     void rendered(const QString &key, const QString &path);
     void failed(const QString &key, const QString &error);
-    /// 佇列清空（所有請求都已完成或失敗）。
+    /// The queue drained (every request either finished or failed).
     void idle();
 
 private Q_SLOTS:
@@ -61,10 +64,10 @@ private:
 
     void startNext();
 
-    IMermaidRenderer *m_renderer = nullptr;
+    IMermaidRenderer *m_renderer = nullptr;   ///< Not owned
     QString m_cacheDir;
     QQueue<Job> m_queue;
     bool m_busy = false;
     Job m_current;
-    QHash<QString, bool> m_queued;   ///< key → 已排入，避免重複
+    QHash<QString, bool> m_queued;   ///< key -> queued, to avoid duplicates
 };

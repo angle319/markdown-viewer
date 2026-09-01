@@ -20,16 +20,16 @@ private slots:
     void mermaidKeyIsSha1OfSource();
     void mermaidDisabledFallsBackToCodeBlock();
 
-    // ---- Qt rich-text 子集的相容處理 ----
+    // ---- Qt rich-text subset compatibility ----
     void strikethroughUsesSTag();
     void taskListBecomesCheckboxGlyphs();
     void htmlSpecialCharsAreEscaped();
 
-    // ---- 圖片 ----
+    // ---- Images ----
     void relativeImageResolvesAgainstBaseDir();
     void absoluteImageUrlIsUntouched();
 
-    // ---- 其他區塊 ----
+    // ---- Other blocks ----
     void tableIsRendered();
     void fencedCodeIsEscapedAndWrapped();
 };
@@ -51,7 +51,7 @@ void TestMarkdownParser::tocCapturesLevelsAndText()
 
 void TestMarkdownParser::tocSlugFollowsGithubRules()
 {
-    // 小寫、空白轉 '-'、去標點、保留 '-' 與 '_'
+    // Lower-cased, whitespace to '-', punctuation dropped, '-' and '_' kept
     const Document d = MarkdownParser::parse("## Hello, World! (v2)\n\n## snake_case-and-dash\n");
 
     QCOMPARE(d.toc.size(), 2);
@@ -61,7 +61,7 @@ void TestMarkdownParser::tocSlugFollowsGithubRules()
 
 void TestMarkdownParser::tocSlugDeduplicates()
 {
-    // GitHub 行為：第二次起加 -1, -2 …
+    // GitHub's behaviour: -1, -2, ... from the second occurrence on
     const Document d = MarkdownParser::parse("## Dup\n\n## Dup\n\n## Dup\n");
 
     QCOMPARE(d.toc.size(), 3);
@@ -96,10 +96,10 @@ void TestMarkdownParser::mermaidFenceBecomesImagePlaceholder()
     QCOMPARE(d.mermaid.size(), 1);
     QCOMPARE(d.mermaid[0].source.trimmed(), QStringLiteral("flowchart LR\n  A --> B"));
 
-    // 原位置換成 <img src="mermaid://<key>">
+    // Replaced in place by <img src="mermaid://<key>">
     QVERIFY2(d.html.contains("<img src=\"mermaid://" + d.mermaid[0].key + "\""),
              qPrintable("html 缺少 mermaid 佔位圖:\n" + d.html));
-    // 不應同時留下程式碼區塊
+    // The code block must not survive alongside it
     QVERIFY(!d.html.contains("flowchart LR"));
 }
 
@@ -126,11 +126,11 @@ void TestMarkdownParser::mermaidDisabledFallsBackToCodeBlock()
     QVERIFY2(d.html.contains("graph TD"), qPrintable(d.html));
 }
 
-// -------------------------------------------- Qt rich-text 子集相容
+// ------------------------------------- Qt rich-text subset compatibility
 
 void TestMarkdownParser::strikethroughUsesSTag()
 {
-    // Qt rich-text 不認 <del>，必須是 <s>
+    // Qt rich text does not know <del>; it must be <s>
     const Document d = MarkdownParser::parse("~~gone~~\n");
 
     QVERIFY2(d.html.contains("<s>gone</s>"), qPrintable(d.html));
@@ -139,7 +139,7 @@ void TestMarkdownParser::strikethroughUsesSTag()
 
 void TestMarkdownParser::taskListBecomesCheckboxGlyphs()
 {
-    // Qt 不渲染 <input type=checkbox>，改用字元
+    // Qt does not render <input type=checkbox>; use glyphs instead
     const Document d = MarkdownParser::parse("- [x] done\n- [ ] todo\n");
 
     QVERIFY(!d.html.contains("<input"));
@@ -154,7 +154,7 @@ void TestMarkdownParser::htmlSpecialCharsAreEscaped()
     QVERIFY2(d.html.contains("a &lt; b &amp; c &gt; d"), qPrintable(d.html));
 }
 
-// -------------------------------------------------------------- 圖片
+// ------------------------------------------------------------- Images
 
 void TestMarkdownParser::relativeImageResolvesAgainstBaseDir()
 {
@@ -171,7 +171,7 @@ void TestMarkdownParser::absoluteImageUrlIsUntouched()
     QVERIFY2(d.html.contains("src=\"https://example.com/y.png\""), qPrintable(d.html));
 }
 
-// ---------------------------------------------------------- 其他區塊
+// ------------------------------------------------------- Other blocks
 
 void TestMarkdownParser::tableIsRendered()
 {

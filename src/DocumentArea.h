@@ -11,13 +11,16 @@ class QLabel;
 class QMenu;
 class QSplitter;
 
-/// 分割面板的容器 —— VS Code 的 editor group 模型。
+/// Container for the split panes — VS Code's editor group model.
 ///
-/// 每個 PaneGroup 有自己的分頁列，一份文件屬於其中一格。這樣「哪個分頁對應
-/// 哪一格」在畫面上是自明的；先前用單一全域分頁列的版本做不到這件事。
+/// Each PaneGroup has its own tab bar and a document belongs to exactly one of
+/// them, which makes "which tab belongs to which pane" self-evident. An earlier
+/// design with a single global tab bar could not express that.
 ///
-/// 分割的產生方式有兩種：選單選欄數，或把分頁拖到某一格的左右邊緣。
-/// 拖到中間則是移入該格。空掉的面板會自動收掉（至少保留一格）。
+/// Splits come from two places: choosing a pane count from the menu, or
+/// dragging a tab to a pane's left or right edge. Dropping in the middle moves
+/// the tab into that pane instead. Empty panes are removed automatically, and
+/// at least one always remains.
 class DocumentArea : public QWidget
 {
     Q_OBJECT
@@ -27,10 +30,10 @@ public:
 
     explicit DocumentArea(MermaidCache *cache, QWidget *parent = nullptr);
 
-    /// 開檔。已經開過就切到那個分頁（可能在別的面板），不會重複開。
+    /// Opens a file. An already-open file switches to its tab, wherever it is.
     DocumentView *openFile(const QString &path);
 
-    // ---- 以「全域索引」看待所有文件：面板順序 × 面板內分頁順序 ----
+    // ---- Global indexing over all documents: pane order x tab order ----
     int count() const;
     DocumentView *viewAt(int index) const;
     QStringList openPaths() const;
@@ -45,34 +48,35 @@ public:
     void nextTab();
     void previousTab();
 
-    // ---- 面板 ----
+    // ---- Panes ----
     int paneCount() const;
     PaneGroup *paneAt(int index) const;
-    /// 面板數量。1 = 沒有分割。
+    /// Number of panes. 1 means no split.
     void setPaneCount(int panes);
-    /// 把作用中的分頁搬到相鄰面板；沒有相鄰面板時新建一個。
+    /// Moves the active tab to the neighbouring pane, creating one if needed.
     void moveActiveTabToPane(int delta);
 
-    /// 把某一格的某個分頁搬到另一格。zone 為 Into 是併入，
-    /// SplitLeft/SplitRight 則在目標格的該側新開一格。
+    /// Moves a tab from one pane to another. Into merges, SplitLeft and
+    /// SplitRight create a new pane on that side of the target.
     ///
-    /// 公開是為了可測：合成跨 widget 的 QDrag 序列在測試裡跑不起來
-    /// （同 MainWindow::openFromUrls 的理由）。dropEvent 只是這個方法的轉接。
+    /// Public so it can be tested: a synthesised cross-widget QDrag sequence
+    /// does not run in a test (same reason as MainWindow::openFromUrls).
+    /// dropEvent is a thin adapter over this.
     void moveTabToPane(PaneGroup *source, int index, PaneGroup *target,
                        PaneGroup::DropZone zone);
 
-    /// 目前每一格顯示的文件，依面板順序。
+    /// The document currently shown in each pane, in pane order.
     QList<DocumentView *> visibleViews() const;
 
-    /// 關閉同一格裡除了 keepIndex 以外的所有分頁。
+    /// Closes every tab in the pane except keepIndex.
     void closeOtherTabs(PaneGroup *pane, int keepIndex);
-    /// 關閉同一格裡 fromIndex 右側的所有分頁。
+    /// Closes every tab in the pane to the right of fromIndex.
     void closeTabsToTheRight(PaneGroup *pane, int fromIndex);
-    /// 關閉整格。
+    /// Closes the whole pane.
     void closePane(PaneGroup *pane);
 
-    /// 建立分頁的右鍵選單。呼叫端負責刪除。
-    /// 公開是為了可測 —— 測試要能檢查選項並直接觸發。
+    /// Builds the tab context menu. The caller owns the result.
+    /// Public so tests can inspect the entries and trigger them directly.
     QMenu *buildTabContextMenu(PaneGroup *pane, int index, QWidget *parent = nullptr);
 
     void setTheme(Theme::Mode mode);
@@ -96,19 +100,21 @@ private:
     void setActivePane(PaneGroup *pane);
     void pruneEmptyPanes();
     void refreshPaneIndicators();
-    /// 結構變動後重新配置：平均分配面板寬度並強制重繪。
+    /// Re-lays out after a structural change: equalises pane widths and forces
+    /// a repaint.
     void refreshLayout();
     void updatePlaceholder();
     PaneGroup *paneOf(DocumentView *view) const;
     void onTabDropped(PaneGroup *target, PaneGroup::DropZone zone);
 
-    MermaidCache *m_cache = nullptr;   ///< 不擁有
+    MermaidCache *m_cache = nullptr;   ///< Not owned
     QSplitter *m_splitter = nullptr;
     QLabel *m_placeholder = nullptr;
     PaneGroup *m_activeGroup = nullptr;
     Theme::Mode m_mode = Theme::Light;
 
-    /// 跨面板拖曳的來源，在 tabDragOut 時記下（同一時間只會有一個拖曳）
+    /// Source of a cross-pane drag, recorded on tabDragOut. Only one drag can
+    /// be in flight at a time.
     struct DragSource {
         PaneGroup *pane = nullptr;
         int index = -1;

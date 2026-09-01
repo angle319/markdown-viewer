@@ -23,23 +23,27 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
-    /// 開檔。已開過的檔案會切到既有分頁，不會重複開。
+    /// Opens a file. An already-open file switches to its existing tab.
     bool openFile(const QString &path);
 
-    /// 作用中的分頁；沒有任何分頁時回傳 nullptr。
+    /// The active document, or nullptr when no tab is open.
     DocumentView *activeView() const;
     DocumentArea *area() const { return m_area; }
 
-    /// 從一組拖入的 URL 挑出第一個能處理的本機路徑（markdown 檔優先，其次資料夾）。
-    /// 純邏輯，公開以便單元測試。
+    /// Picks the first usable local path from a set of dropped URLs: a markdown
+    /// file if there is one, otherwise a directory. Pure logic, public so it can
+    /// be unit tested.
     static QString firstUsablePath(const QList<QUrl> &urls);
 
-    /// 處理一組拖入的 URL：markdown 檔就開、資料夾就換側邊欄的根。
-    /// 回傳是否有東西被處理。
+    /// Handles a set of dropped URLs: a markdown file is opened, a directory
+    /// re-roots the sidebar. Returns whether anything was handled.
     ///
-    /// 與 dropEvent 分開是為了可測 —— 合成 QDropEvent 送給 widget 在測試裡
-    /// 走不到（QWidget::event 是 protected，而 QApplication::notify 對拖放
-    /// 另有一套經過 QDragManager 的流程）。dropEvent 只是這個方法的薄轉接。
+    /// Separate from dropEvent so it can be tested: a synthesised QDropEvent
+    /// never reaches the handler in a test, because QWidget::event() is
+    /// protected and QApplication::notify routes drag and drop through
+    /// QDragManager. dropEvent is a thin adapter over this.
+    ///
+    /// 中：合成 QDropEvent 在測試裡送不到，所以邏輯抽在這裡。
     bool openFromUrls(const QList<QUrl> &urls);
 
 protected:
@@ -48,7 +52,8 @@ protected:
     void dropEvent(QDropEvent *e) override;
 
 public Q_SLOTS:
-    /// 路徑列送出：檔案就開啟、資料夾就換側邊欄根目錄、不存在就在狀態列說明。
+    /// Path bar submitted: open a file, re-root on a directory, or report a
+    /// missing path in the status bar.
     void onPathSubmitted(const QString &path);
 
 private Q_SLOTS:
@@ -56,7 +61,7 @@ private Q_SLOTS:
     void onReloadTriggered();
     void onLinkActivated(const QUrl &url);
     void focusPathBar();
-    /// 作用中分頁換了：標題、路徑列、TOC 都要跟上
+    /// The active tab changed; title, path bar and TOC must follow
     void syncToActiveView();
 
 private:
@@ -82,5 +87,5 @@ private:
     QLabel *m_statusRight = nullptr;
 
     Theme::Mode m_mode = Theme::Light;
-    bool m_themeApplied = false;   ///< 啟動時要無條件套用一次
+    bool m_themeApplied = false;   ///< Forces one unconditional apply at startup
 };

@@ -9,14 +9,16 @@ class FileWatcher;
 class IRenderBackend;
 class MermaidCache;
 
-/// 一份 markdown 文件的完整狀態與畫面。
+/// The complete state and view of one markdown document.
 ///
-/// 這個類別存在的理由是多文件：原本 path / 原始碼 / Document / render backend /
-/// 檔案監看全都掛在 MainWindow 上，只能開一份。抽出來之後，分頁就是一組
-/// DocumentView，比較模式就是同時顯示其中幾個。
+/// This class exists so that several documents can be open at once: path,
+/// source, Document, render backend and file watcher all used to hang off
+/// MainWindow, which structurally allowed only one. With them extracted, a tab
+/// is a DocumentView and a split pane simply shows a different one.
 ///
-/// MermaidCache 由外部共用而非每份文件各持一份 —— 它的 key 是內容雜湊，
-/// 不同文件裡相同的圖表本來就該共用同一張快取。
+/// MermaidCache is shared from outside rather than owned per document: its key
+/// is a content hash, so the same diagram in two documents should reuse one
+/// cached image.
 class DocumentView : public QWidget
 {
     Q_OBJECT
@@ -28,7 +30,8 @@ public:
     bool openFile(const QString &path);
 
     QString path() const { return m_path; }
-    /// 文件的第一個 H1；沒有就用檔名。空文件回傳空字串。
+    /// The document's first H1, falling back to the file name. Empty when no
+    /// document is loaded.
     QString title() const;
     const Document &document() const { return m_doc; }
     bool isEmpty() const { return m_path.isEmpty(); }
@@ -47,21 +50,21 @@ public:
     IRenderBackend *backend() const { return m_backend; }
 
 Q_SIGNALS:
-    /// 標題變了（開了不同檔案、或檔案內容改變導致 H1 變了）
+    /// The title changed (a different file was opened, or a reload changed the H1)
     void titleChanged();
-    /// 文件被換掉，TOC 需要重建
+    /// The document was replaced; the TOC needs rebuilding
     void documentReplaced();
-    /// 視埠最上方的標題換了，index 為 Document::toc 的索引
+    /// The heading at the top of the viewport changed; index is into Document::toc
     void currentTocIndexChanged(int index);
-    /// 使用者點了連結
+    /// A link was activated
     void linkActivated(const QUrl &url);
-    /// 想在狀態列顯示的訊息
+    /// A message for the status bar
     void statusMessage(const QString &text);
 
 private:
     void reparse(bool preserveScroll);
 
-    MermaidCache *m_cache = nullptr;       ///< 不擁有
+    MermaidCache *m_cache = nullptr;       ///< Not owned
     IRenderBackend *m_backend = nullptr;
     FileWatcher *m_watcher = nullptr;
 

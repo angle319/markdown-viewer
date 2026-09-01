@@ -21,7 +21,8 @@ PathBar::PathBar(QWidget *parent)
     m_edit->setPlaceholderText(QStringLiteral("輸入檔案或資料夾路徑，Enter 開啟（Ctrl+L 聚焦）"));
     m_edit->installEventFilter(this);
 
-    // 自動完成：整個檔案系統，不設 name filter —— 使用者可能要跳到某個資料夾
+    // Completion covers the whole file system with no name filter: the user may
+    // well be navigating to a directory rather than a file
     m_model->setRootPath(QStringLiteral("/"));
     m_model->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot);
     m_completer = new QCompleter(m_model, this);
@@ -61,7 +62,7 @@ QString PathBar::resolveInput(const QString &input, const QString &baseDir)
     if (s.isEmpty())
         return {};
 
-    // 去掉常見的貼上雜訊
+    // Strip the noise that commonly arrives via paste
     if (s.startsWith(QLatin1String("file://")))
         s = QUrl(s).toLocalFile();
 

@@ -9,9 +9,10 @@
 
 int main(int argc, char *argv[])
 {
-    // 這個 app 全程是 raster 繪製，完全不用 OpenGL。若放任 xcb QPA 載入它的
-    // GL 整合，會把 Mesa 的 llvmpipe 連帶 libLLVM 拉進行程 —— 實測光那一顆
-    // 就佔 13MB PSS（基準 49.1MB → 32.7MB）。使用者若明確設過就尊重其設定。
+    // This application paints entirely through the raster engine and never uses
+    // OpenGL. Letting the xcb QPA load its GL integration drags in Mesa's
+    // llvmpipe and libLLVM, which measured 13 MB of PSS on its own (49.1 MB
+    // baseline down to 32.7 MB without it). An explicit user setting wins.
     if (!qEnvironmentVariableIsSet("QT_XCB_GL_INTEGRATION"))
         qputenv("QT_XCB_GL_INTEGRATION", "none");
 
@@ -33,11 +34,11 @@ int main(int argc, char *argv[])
 
     const QStringList args = parser.positionalArguments();
     if (!args.isEmpty()) {
-        // 命令列可以一次給多個檔案，每個開一個分頁
+        // Several files may be given; each opens in its own tab
         for (const QString &a : args)
             w.openFile(a);
     } else {
-        // 沒給參數就還原上次開著的分頁
+        // With no arguments, restore the tabs from the previous session
         QSettings settings;
         const QStringList tabs = settings.value(QStringLiteral("files/openTabs")).toStringList();
         for (const QString &p : tabs)

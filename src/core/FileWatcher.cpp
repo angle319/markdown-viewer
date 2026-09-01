@@ -20,7 +20,7 @@ FileWatcher::FileWatcher(QObject *parent)
         if (m_path.isEmpty())
             return;
 
-        // atomic save 之後原路徑已不在監看清單裡，補回去
+        // After an atomic save the path is no longer being watched; re-add it
         if (!m_watcher->files().contains(m_path) && QFileInfo::exists(m_path))
             m_watcher->addPath(m_path);
 

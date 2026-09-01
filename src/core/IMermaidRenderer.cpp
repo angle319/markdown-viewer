@@ -1,8 +1,9 @@
 #include "core/IMermaidRenderer.h"
 
-// 這個 .cpp 存在的理由有兩個：
-//  1. 多型基底類別的解構子放 out-of-line，避免每個 TU 都產生一份 vtable。
-//  2. CMake 的 AUTOMOC 只會替「與某個 source 同名」或明列在 sources 裡的 header
-//     跑 moc。純 header 的 Q_OBJECT 類別會缺 vtable 與 staticMetaObject，
-//     連結時報 undefined reference。
+// This .cpp exists for two reasons:
+//  1. An out-of-line destructor for a polymorphic base keeps the vtable out of
+//     every translation unit.
+//  2. CMake's AUTOMOC only runs moc on headers that share a name with a listed
+//     source, or that are listed as sources themselves. A header-only Q_OBJECT
+//     class ends up without a vtable or staticMetaObject and fails to link.
 IMermaidRenderer::~IMermaidRenderer() = default;

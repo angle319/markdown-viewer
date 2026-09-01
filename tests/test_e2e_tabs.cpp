@@ -21,7 +21,14 @@
 #include "PathBar.h"
 #include "Theme.h"
 
-/// 多文件：分頁與比較模式。
+#ifndef SAMPLE_MD
+#  error "SAMPLE_MD not defined (CMake should supply the path to docs/sample.md)"
+#endif
+#ifndef HEADINGS_MD
+#  error "HEADINGS_MD not defined (CMake should supply the path to docs/headings.md)"
+#endif
+
+/// Multiple documents: tabs and split panes.
 class TestE2eTabs : public QObject
 {
     Q_OBJECT
@@ -31,7 +38,7 @@ private slots:
     void init();
     void cleanup();
 
-    // --- 分頁 ---
+    // --- Tabs ---
     void openingTwoFilesCreatesTwoTabs();
     void reopeningSameFileSwitchesInsteadOfDuplicating();
     void tabTitleComesFromDocumentHeading();
@@ -39,10 +46,11 @@ private slots:
     void closingTabRemovesItAndKeepsOthers();
     void closingLastTabShowsEmptyState();
     void tabsCanBeReordered();
+    void longTabTitlesAreCapped();
     void eachTabWatchesItsOwnFile();
     void linkNavigationStaysInSameTab();
 
-    // --- 分割面板（VS Code 式的 editor group）---
+    // --- Split panes (VS Code style editor groups) ---
     void splittingGivesEachPaneItsOwnTabBar();
     void paneCountNeverExceedsDocumentCount();
     void mergingPanesBringsDocumentsBack();
@@ -55,17 +63,17 @@ private slots:
     void paneGeometryStaysSaneAfterMoves();
     void panesGetComparableWidths();
 
-    // --- 分頁右鍵選單 ---
+    // --- Tab context menu ---
     void contextMenuOffersCloseOptions();
     void closeOthersLeavesOnlyThatTab();
     void closeToTheRightKeepsLeftSide();
     void closePaneClosesAllItsTabs();
 
-    // --- 全域操作套用到所有分頁 ---
+    // --- Whole-area actions reach every tab ---
     void themeAppliesToEveryTab();
     void zoomAppliesToEveryTab();
 
-    // --- 可選的視覺輸出 ---
+    // --- Optional visual output ---
     void dumpScreenshotsIfRequested();
 
 private:
@@ -119,7 +127,7 @@ QString TestE2eTabs::make(const QString &name, const QString &title, int paragra
     return path;
 }
 
-// ------------------------------------------------------------------ 分頁
+// ----------------------------------------------------------------- Tabs
 
 void TestE2eTabs::openingTwoFilesCreatesTwoTabs()
 {
@@ -131,7 +139,7 @@ void TestE2eTabs::openingTwoFilesCreatesTwoTabs()
     QCOMPARE(area()->activeIndex(), 1);
     QCOMPARE(tabBar()->count(), 2);
 
-    // 兩個分頁各自持有不同的文件
+    // The two tabs hold two distinct documents
     QVERIFY(area()->viewAt(0) != area()->viewAt(1));
     QCOMPARE(area()->viewAt(0)->title(), QStringLiteral("甲"));
     QCOMPARE(area()->viewAt(1)->title(), QStringLiteral("乙"));
@@ -150,7 +158,7 @@ void TestE2eTabs::reopeningSameFileSwitchesInsteadOfDuplicating()
     QCOMPARE(area()->count(), 2);          // 沒有多開
     QCOMPARE(area()->activeIndex(), 0);    // 切到既有那個
 
-    // 相對路徑也要認得出是同一個檔
+    // A non-canonical path must be recognised as the same file
     QVERIFY(m_win->openFile(m_dir->path() + QStringLiteral("/./a.md")));
     QCOMPARE(area()->count(), 2);
 }
@@ -161,7 +169,7 @@ void TestE2eTabs::tabTitleComesFromDocumentHeading()
     QCOMPARE(tabBar()->tabText(0), QStringLiteral("我的標題"));
     QCOMPARE(tabBar()->tabToolTip(0), area()->viewAt(0)->path());
 
-    // 沒有 H1 時用檔名
+    // With no H1 the file name is used
     const QString path = m_dir->path() + QStringLiteral("/noheading.md");
     QFile f(path);
     QVERIFY(f.open(QIODevice::WriteOnly));
@@ -221,14 +229,14 @@ void TestE2eTabs::closingLastTabShowsEmptyState()
     QCOMPARE(m_win->findChild<PathBar *>()->path(), QString());
     QCOMPARE(m_win->findChild<QTreeWidget *>()->topLevelItemCount(), 0);
 
-    // 空狀態提示要看得到
+    // The empty-state hint must be visible
     bool sawPlaceholder = false;
     for (QLabel *l : area()->findChildren<QLabel *>())
         if (l->isVisible() && l->text().contains(QStringLiteral("沒有開啟任何檔案")))
             sawPlaceholder = true;
     QVERIFY2(sawPlaceholder, "關掉最後一個分頁後沒有空狀態提示");
 
-    // 還能再開
+    // Opening still works afterwards
     QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
     QCOMPARE(area()->count(), 1);
 }
@@ -246,6 +254,38 @@ void TestE2eTabs::tabsCanBeReordered()
     QCOMPARE(area()->viewAt(0)->title(), QStringLiteral("乙"));
 }
 
+void TestE2eTabs::longTabTitlesAreCapped()
+{
+    // A very long H1 used to stretch its tab right across the pane.
+    // setElideMode() alone does not help: Qt elides only once the whole bar
+    // overflows, so a single long tab keeps its full width.
+    // 中：單一長標題會把分頁撐爆，要蓋 tabSizeHint。
+    const QString longTitle =
+        QStringLiteral("一個刻意很長的標題 — 長到足以撐爆分頁 — 用來驗證寬度上限有生效");
+    QVERIFY(m_win->openFile(make(QStringLiteral("long.md"), longTitle)));
+    QVERIFY(m_win->openFile(make(QStringLiteral("s.md"), QStringLiteral("短"))));
+
+    PaneGroup *pane = area()->paneAt(0);
+    QTabBar *bar = pane->tabBar();
+    QCOMPARE(bar->tabText(0), longTitle);          // the model keeps the full text
+
+    const int longWidth = bar->tabRect(0).width();
+    const int shortWidth = bar->tabRect(1).width();
+    qInfo() << "long tab" << longWidth << "px, short tab" << shortWidth << "px";
+
+    QVERIFY2(longWidth <= PaneTabBar::MaxTabWidth,
+             qPrintable(QStringLiteral("long tab is %1px, cap is %2px")
+                            .arg(longWidth).arg(PaneTabBar::MaxTabWidth)));
+    // A short title must still get a short tab — the cap is a maximum, not a fixed width
+    QVERIFY2(shortWidth < longWidth,
+             qPrintable(QStringLiteral("short tab %1px is not narrower than long tab %2px")
+                            .arg(shortWidth).arg(longWidth)));
+    QVERIFY(shortWidth >= PaneTabBar::MinTabWidth);
+
+    // The full title stays reachable through the tooltip
+    QCOMPARE(bar->tabToolTip(0), area()->viewAt(0)->path());
+}
+
 void TestE2eTabs::eachTabWatchesItsOwnFile()
 {
     const QString a = make(QStringLiteral("a.md"), QStringLiteral("甲"), 2);
@@ -254,14 +294,15 @@ void TestE2eTabs::eachTabWatchesItsOwnFile()
     QVERIFY(m_win->openFile(b));
     area()->setActiveIndex(1);             // 作用中是「乙」
 
-    // 改「甲」的檔案：即使它不是作用中的分頁，也該重新載入
+    // Edit the first document's file: it must reload even though its tab is
+    // not the active one
     QFile f(a);
     QVERIFY(f.open(QIODevice::Append));
     f.write(QStringLiteral("\n## 甲 的第 3 節\n\n新內容。\n").toUtf8());
     f.close();
 
     QTRY_VERIFY_WITH_TIMEOUT(area()->viewAt(0)->document().toc.size() == 4, 8000);
-    // 作用中的分頁不受影響
+    // The active tab is unaffected
     QCOMPARE(area()->activeIndex(), 1);
     QCOMPARE(area()->viewAt(1)->document().toc.size(), 3);
 }
@@ -281,15 +322,15 @@ void TestE2eTabs::linkNavigationStaysInSameTab()
     QVERIFY(QMetaObject::invokeMethod(m_win.data(), "onLinkActivated",
                                       Q_ARG(QUrl, QUrl(QStringLiteral("target.md")))));
 
-    // 關鍵：在同一個分頁內換檔，不新增分頁。
-    // 像 INDEX.md 那種幾十個連結的索引頁，每點一次開一個分頁很快就爆掉。
+    // The point: the file changes within the same tab, no new tab is added.
+    // An index page with dozens of links would otherwise spawn dozens of tabs.
     QTRY_COMPARE(area()->count(), 1);
     QCOMPARE(area()->activeView()->title(), QStringLiteral("目標"));
     QCOMPARE(tabBar()->tabText(0), QStringLiteral("目標"));
     QCOMPARE(m_win->findChild<PathBar *>()->path(), QFileInfo(target).absoluteFilePath());
 }
 
-// -------------------------------------------------------------- 比較模式
+// --------------------------------------------------------- Split panes
 
 void TestE2eTabs::splittingGivesEachPaneItsOwnTabBar()
 {
@@ -302,8 +343,9 @@ void TestE2eTabs::splittingGivesEachPaneItsOwnTabBar()
     area()->setPaneCount(2);
     QCOMPARE(area()->paneCount(), 2);
 
-    // 關鍵：每一格都有自己的分頁列，而且列出的正是屬於它的文件。
-    // 先前的單一全域分頁列做不到這件事 —— 看不出哪個分頁對應哪一格。
+    // The point: each pane has its own tab bar listing exactly its own
+    // documents. The earlier single global bar could not express that — there
+    // was no way to tell which tab belonged to which pane.
     int totalTabs = 0;
     for (int i = 0; i < area()->paneCount(); ++i) {
         PaneGroup *pane = area()->paneAt(i);
@@ -365,7 +407,7 @@ void TestE2eTabs::dropZoneIsComputedFromPosition()
     QCOMPARE(PaneGroup::zoneFor(pane, QPoint(390, 150)), PaneGroup::DropZone::SplitRight);
     QCOMPARE(PaneGroup::zoneFor(pane, QPoint(200, 150)), PaneGroup::DropZone::Into);
 
-    // 很窄的面板也要留得住可用的邊緣區
+    // Even a narrow pane must keep a usable edge zone
     const QRect narrow(0, 0, 100, 300);
     QCOMPARE(PaneGroup::zoneFor(narrow, QPoint(5, 10)), PaneGroup::DropZone::SplitLeft);
     QCOMPARE(PaneGroup::zoneFor(narrow, QPoint(95, 10)), PaneGroup::DropZone::SplitRight);
@@ -378,8 +420,9 @@ void TestE2eTabs::droppingTabOnEdgeSplits()
     PaneGroup *pane = area()->paneAt(0);
     QCOMPARE(area()->paneCount(), 1);
 
-    // 把「甲」拖到同一格的右緣 → 在右邊開一格
-    // （真正的 QDrag 序列在測試裡跑不起來，所以驗的是 dropEvent 轉接的那個方法）
+    // Drop the first document on the right edge of its own pane, creating one
+    // on that side. A real QDrag sequence does not run in a test, so this
+    // exercises the method dropEvent adapts to.
     area()->moveTabToPane(pane, pane->indexOfPath(area()->viewAt(0)->path()), pane,
                           PaneGroup::DropZone::SplitRight);
 
@@ -388,7 +431,7 @@ void TestE2eTabs::droppingTabOnEdgeSplits()
     QCOMPARE(area()->paneAt(1)->count(), 1);
     QCOMPARE(area()->paneAt(1)->currentView()->title(), QStringLiteral("甲"));
 
-    // 拖到左緣則插在左邊
+    // Dropping on the left edge inserts on the left
     PaneGroup *right = area()->paneAt(1);
     area()->moveTabToPane(right, 0, area()->paneAt(0), PaneGroup::DropZone::SplitLeft);
     QCOMPARE(area()->paneCount(), 2);
@@ -403,7 +446,8 @@ void TestE2eTabs::droppingTabIntoAnotherPaneMovesIt()
     QCOMPARE(area()->paneAt(0)->count(), 1);
     QCOMPARE(area()->paneAt(1)->count(), 1);
 
-    // 把右格的分頁拖進左格中央 → 併入，右格空掉後自動收掉
+    // Drop the right pane's tab into the middle of the left pane: it merges,
+    // and the now-empty right pane is removed
     area()->moveTabToPane(area()->paneAt(1), 0, area()->paneAt(0),
                           PaneGroup::DropZone::Into);
 
@@ -419,7 +463,7 @@ void TestE2eTabs::emptyPaneIsRemovedAutomatically()
     area()->setPaneCount(2);
     QCOMPARE(area()->paneCount(), 2);
 
-    // 關掉右格唯一的分頁
+    // Close the right pane's only tab
     area()->setActiveIndex(1);
     area()->closeActiveTab();
 
@@ -433,14 +477,14 @@ void TestE2eTabs::activePaneIsMarkedOnlyWhenSplit()
     QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
     QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
 
-    // 只有一格時不需要標示「哪一格是作用中的」
+    // With a single pane there is nothing to mark as active
     QCOMPARE(area()->paneCount(), 1);
     QVERIFY(!area()->paneAt(0)->isActiveIndicatorVisible());
 
     area()->setPaneCount(2);
     QCOMPARE(area()->paneCount(), 2);
 
-    // 分割後，而且只有作用中那一格有標示
+    // After splitting, exactly the active pane is marked
     int marked = 0;
     for (int i = 0; i < area()->paneCount(); ++i) {
         PaneGroup *p = area()->paneAt(i);
@@ -450,21 +494,22 @@ void TestE2eTabs::activePaneIsMarkedOnlyWhenSplit()
     }
     QCOMPARE(marked, 1);
 
-    // 切到另一格，標示要跟著移動
+    // Switching panes moves the marker
     PaneGroup *other = area()->paneAt(0) == area()->activeGroup() ? area()->paneAt(1)
                                                                   : area()->paneAt(0);
     area()->setActiveIndex(area()->paneAt(0) == other ? 0 : area()->count() - 1);
     QVERIFY(other->isActiveIndicatorVisible());
 
-    // 併回一格後標示消失
+    // Merging back to one pane clears it
     area()->setPaneCount(1);
     QVERIFY(!area()->paneAt(0)->isActiveIndicatorVisible());
 }
 
-/// 每次結構變動後都要成立的不變式：
-///  - 每個 DocumentView 都在某一格的堆疊裡（不會變成孤兒或直接掛在面板上）
-///  - 只有各格的當前文件是可見的
-///  - 可見的文件不會蓋到分頁列（幾何要在分頁列下方）
+/// Invariants that must hold after every structural change:
+///  - every DocumentView lives in some pane's stack (never orphaned, never
+///    parented straight onto the PaneGroup)
+///  - only each pane's current document is visible
+///  - a visible document never overlaps the tab bar
 static void checkPaneInvariants(DocumentArea *area, const char *where)
 {
     for (int i = 0; i < area->paneCount(); ++i) {
@@ -475,7 +520,7 @@ static void checkPaneInvariants(DocumentArea *area, const char *where)
             DocumentView *v = pane->viewAt(t);
             QVERIFY2(v, where);
 
-            // 必須是這一格的後代，而且不是直接掛在 PaneGroup 上
+            // Must be a descendant of this pane, and not a direct child of it
             QVERIFY2(pane->isAncestorOf(v),
                      qPrintable(QStringLiteral("%1: 文件不在面板裡").arg(QLatin1String(where))));
             QVERIFY2(v->parentWidget() != pane,
@@ -488,9 +533,10 @@ static void checkPaneInvariants(DocumentArea *area, const char *where)
                                     .arg(QLatin1String(where)).arg(i).arg(t)));
 
             if (shouldShow) {
-                // 內容必須落在分頁列下方。
-                // 注意座標系：v->geometry() 是相對於它的父層（QStackedWidget），
-                // 分頁列的 geometry 則是相對於 PaneGroup，要先 mapTo 同一個座標系。
+                // Content must sit below the tab bar.
+                // Mind the coordinate systems: v->geometry() is relative to its
+                // parent (the QStackedWidget) while the tab bar's geometry is
+                // relative to the PaneGroup, so map into one space first.
                 const int contentTop = v->mapTo(pane, QPoint(0, 0)).y();
                 const int tabBottom = pane->tabBar()->geometry().bottom();
                 QVERIFY2(contentTop >= tabBottom,
@@ -522,7 +568,7 @@ void TestE2eTabs::paneGeometryStaysSaneAfterMoves()
     QTest::qWait(50);
     checkPaneInvariants(area(), "分割成 3 格後");
 
-    // 拖曳搬移（真正踩到跑版的那條路徑）
+    // Drag moves — the path that actually produced the broken layout
     area()->moveTabToPane(area()->paneAt(2), 0, area()->paneAt(0),
                           PaneGroup::DropZone::Into);
     QTest::qWait(50);
@@ -533,8 +579,9 @@ void TestE2eTabs::paneGeometryStaysSaneAfterMoves()
     QTest::qWait(50);
     checkPaneInvariants(area(), "拖到邊緣分割後");
 
-    // 拖曳新建出來的面板也要有合理寬度 —— 實際踩過：新格被擠到只剩一百多 px，
-    // 表格與行內 code 被逼到逐字換行
+    // A drag-created pane must also get a sensible width. Measured: the new
+    // pane came out around 150 px, narrow enough to wrap tables and inline code
+    // one character per line.
     for (int i = 0; i < area()->paneCount(); ++i)
         QVERIFY2(area()->paneAt(i)->width() > 200,
                  qPrintable(QStringLiteral("拖曳分割後面板 %1 只有 %2px")
@@ -562,7 +609,8 @@ void TestE2eTabs::panesGetComparableWidths()
     const int minW = *std::min_element(widths.begin(), widths.end());
     qInfo() << "面板寬度" << widths;
 
-    // 新分割出來的面板不能被擠成一條 —— 實際踩過：內容窄到逐字換行
+    // A newly split pane must not be squeezed to a sliver; measured, content
+    // wrapped one character per line
     QVERIFY2(minW > 200,
              qPrintable(QStringLiteral("最窄的面板只有 %1px").arg(minW)));
     QVERIFY2(maxW <= minW * 2,
@@ -588,7 +636,7 @@ void TestE2eTabs::contextMenuOffersCloseOptions()
                                   QStringLiteral("移到右邊面板"),
                                   QStringLiteral("移到左邊面板") }));
 
-    // 停用狀態要合理：只有一格時不能「關閉這一格」
+    // Disabled states must make sense: with one pane, closing it is not offered
     const auto action = [&](const QString &t) -> QAction * {
         for (QAction *a : menu->actions())
             if (a->text() == t)
@@ -599,7 +647,7 @@ void TestE2eTabs::contextMenuOffersCloseOptions()
     QVERIFY(action(QStringLiteral("關閉右側全部"))->isEnabled());       // index 1，右邊還有
     QVERIFY(!action(QStringLiteral("關閉這一格"))->isEnabled());        // 只有一格
 
-    // 最後一個分頁沒有「右側」可關
+    // The last tab has nothing to its right to close
     QScopedPointer<QMenu> last(area()->buildTabContextMenu(pane, 2));
     for (QAction *a : last->actions())
         if (a->text() == QStringLiteral("關閉右側全部"))
@@ -656,7 +704,7 @@ void TestE2eTabs::closePaneClosesAllItsTabs()
     QVERIFY(area()->activeView() != nullptr);
 }
 
-// ------------------------------------------------ 全域操作套用到所有分頁
+// --------------------------------------- Whole-area actions reach every tab
 
 void TestE2eTabs::themeAppliesToEveryTab()
 {
@@ -670,7 +718,7 @@ void TestE2eTabs::themeAppliesToEveryTab()
     QVERIFY(black);
     black->trigger();
 
-    // 非作用中的分頁也要換 —— 否則切回去會看到殘留的舊主題
+    // Inactive tabs must change too, or switching back shows the old theme
     for (int i = 0; i < area()->count(); ++i) {
         QCOMPARE(area()->viewAt(i)->theme(), Theme::Dark);
         auto *b = area()->viewAt(i)->findChild<QTextBrowser *>();
@@ -696,7 +744,7 @@ void TestE2eTabs::zoomAppliesToEveryTab()
     QVERIFY(zoomIn);
     zoomIn->trigger();
 
-    // 比較模式下各欄字級必須一致，所以縮放要套用到全部分頁
+    // Split panes must share a font size, so zoom applies to every tab
     for (int i = 0; i < area()->count(); ++i) {
         const qreal now = area()->viewAt(i)->findChild<QTextBrowser *>()
                               ->document()->defaultFont().pointSizeF();
@@ -713,11 +761,10 @@ void TestE2eTabs::dumpScreenshotsIfRequested()
         QSKIP("未設定 MD_E2E_DUMP，跳過視覺輸出");
     QVERIFY(QDir().mkpath(dir));
 
-    // 用專案自己的文件當語料，內容比合成的豐富
-    const QString root = QStringLiteral("/home/angle/local/personal/project/markdown-tool/docs/");
-    const QStringList docs{ root + QStringLiteral("sample.md"),
-                            root + QStringLiteral("headings.md"),
-                            root + QStringLiteral("sample.md") };
+    // Use the project's own documents; they are richer than synthetic ones
+    const QStringList docs{ QString::fromUtf8(SAMPLE_MD),
+                            QString::fromUtf8(HEADINGS_MD),
+                            QString::fromUtf8(SAMPLE_MD) };
     QVERIFY(m_win->openFile(docs.at(0)));
     QVERIFY(m_win->openFile(docs.at(1)));
     QVERIFY(m_win->openFile(make(QStringLiteral("notes.md"), QStringLiteral("第三份文件"), 6)));

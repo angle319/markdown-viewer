@@ -13,17 +13,18 @@ double channel(double srgb)
 
 const Theme::Colors &Theme::colors(Mode m)
 {
-    // 這些數值是算過對比的，別隨手改；門檻由 tests/test_theme.cpp 守著。
+    // These values have been measured for contrast. Do not change them
+    // casually; the thresholds are enforced by tests/test_theme.cpp.
     static const Colors white{
         QStringLiteral("#ffffff"),   // background
         QStringLiteral("#111111"),   // text        18.88:1
         QStringLiteral("#454545"),   // muted        9.59:1
         QStringLiteral("#0b57d0"),   // link         6.39:1
         QStringLiteral("#f2f2f2"),   // codeBackground
-        QStringLiteral("#8f2d56"),   // codeInline    6.67:1 on #f4eaee, 色相 335°
+        QStringLiteral("#8f2d56"),   // codeInline    6.67:1 on #f4eaee, hue 335
         QStringLiteral("#f4eaee"),   // codeInlineBackground
-        QStringLiteral("#e2e2e2"),   // tabInactive（未選取分頁；muted 文字 7.40:1）
-        QStringLiteral("#8c8c8c"),   // border       3.36:1（非文字）
+        QStringLiteral("#e2e2e2"),   // tabInactive (unselected tab; muted text 7.40:1)
+        QStringLiteral("#8c8c8c"),   // border       3.36:1 (non-text)
         QStringLiteral("#e8e8e8"),   // tableHeader
     };
     static const Colors black{
@@ -32,10 +33,10 @@ const Theme::Colors &Theme::colors(Mode m)
         QStringLiteral("#a6a6a6"),   // muted        8.63:1
         QStringLiteral("#7fb5ff"),   // link         9.96:1
         QStringLiteral("#131313"),   // codeBackground
-        QStringLiteral("#f0a3c8"),   // codeInline    9.25:1 on #1d1418, 色相 331°
+        QStringLiteral("#f0a3c8"),   // codeInline    9.25:1 on #1d1418, hue 331
         QStringLiteral("#1d1418"),   // codeInlineBackground
-        QStringLiteral("#1c1c1c"),   // tabInactive（未選取分頁；muted 文字 7.00:1）
-        QStringLiteral("#707070"),   // border       4.24:1（非文字）
+        QStringLiteral("#1c1c1c"),   // tabInactive (unselected tab; muted text 7.00:1)
+        QStringLiteral("#707070"),   // border       4.24:1 (non-text)
         QStringLiteral("#1c1c1c"),   // tableHeader
     };
     return m == Dark ? black : white;
@@ -63,21 +64,28 @@ QString Theme::documentStyleSheet(Mode m)
 {
     const Colors &c = colors(m);
 
-    // 字級**都不在這裡設**：
-    //  * 標題 —— Qt 對 h5/h6 會套用自己的 fontSizeAdjustment，CSS 蓋不掉，
-    //    改由 applyHeadingScale() 明確設定（見 Theme::headingPointSize）。
-    //  * 正文 —— 實測 `body { font-size }` 對 QTextDocument **完全沒有生效**，
-    //    內文一直是 widget 的系統預設字級。改用 setDefaultFont() 控制。
-    // 這裡只留 margin、行高與顏色（那些 Qt 有正確套用）。
+    // Font sizes are **not** set here:
+    //  * Headings — Qt applies its own fontSizeAdjustment to h5/h6, which CSS
+    //    cannot override, so applyHeadingScale() sets them explicitly (see
+    //    Theme::headingPointSize).
+    //  * Body — measured, `body { font-size }` has **no effect at all** on a
+    //    QTextDocument; body text stayed at the widget's system default until
+    //    setDefaultFont() took over.
+    // Only margins, line height and colours live here — Qt does honour those.
     //
-    // 只用 Qt rich-text 支援的 CSS 屬性子集：color、background-color、
-    // font-*、margin、padding、text-decoration、以及表格的 background-color。
-    // flex / grid / max-width / border-left 都不支援 —— 欄寬靠 viewport margin，
-    // 標題分隔線與引用色條靠 MdTextBrowser::paintEvent 自繪。
+    // Only the CSS subset Qt rich text supports: color, background-color,
+    // font-*, margin, padding, text-decoration and table background-color.
+    // flex, grid, max-width and border-left are all unsupported — the column
+    // width comes from viewport margins, and the heading rules and blockquote
+    // bar are painted by MdTextBrowser::paintEvent().
     //
-    // 刻意用具名 token 而不是 %1 %2：QString::arg 的多引數版本是按「字串中出現的
-    // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
-    // （例如 %4）就會讓其後全部錯位 —— 這個坑真的踩過，害 code 的底色拿到前景色。
+    // Named tokens rather than %1/%2 on purpose: QString::arg's multi-argument
+    // overload substitutes the *lowest-numbered markers present*, in order —
+    // it does not map %N to the Nth argument. Skipping one number (say %4)
+    // shifts everything after it. That actually happened here and left inline
+    // code's background-color holding the foreground colour.
+    //
+    // 中：QString::arg 多引數會錯位，所以一律用具名 token。
     QString css = QStringLiteral(R"(
         body { color: @TEXT@; background-color: @BG@; line-height: @LH@%; }
         h1 { margin-top: 24px; margin-bottom: 12px; color: @TEXT@; }
@@ -122,9 +130,10 @@ QString Theme::tabBarStyleSheet(Mode m)
 {
     const Colors &c = colors(m);
 
-    // 選取中的分頁用頁面底色 + 正文色 + 頂端強調線；未選取的沉一階、用次要色。
-    // 這樣「焦點在哪個分頁」有三個線索（底色、文字亮度、強調線），
-    // 不是只靠一點點底色差異。
+    // The selected tab uses the page background, the body text colour and a top
+    // accent line; unselected tabs sit one step back with secondary text. That
+    // gives three cues for where focus is — background, text weight and the
+    // accent line — rather than a single faint shade difference.
     QString qss = QStringLiteral(R"(
         QTabBar::tab {
             background: @INACTIVE@;
@@ -161,15 +170,17 @@ QString Theme::tabBarStyleSheet(Mode m)
 
 QPalette Theme::palette(Mode m)
 {
-    // 必須把 role 設滿。只設 Window/Base/Text 的話，QTabBar 與 QMenuBar 會用
-    // 預設的 Button/ButtonText（淺色系）去畫，在黑色主題下就變成
-    // 「淺色底 + 淺色字」的隱形分頁標籤與隱形選單 —— 實際踩過。
+    // Every role must be set. With only Window/Base/Text, QTabBar and QMenuBar
+    // paint using the default Button/ButtonText (a light pair), which on the
+    // black theme produced invisible tab labels and an invisible menu bar.
+    //
+    // 中：role 沒設滿，黑色主題下分頁標籤與選單列會整個消失。
     const Colors &c = colors(m);
     const QColor bg(c.background);
     const QColor text(c.text);
     const QColor muted(c.muted);
     const QColor link(c.link);
-    const QColor chrome(c.tableHeader);      // 按鈕／分頁的底色
+    const QColor chrome(c.tableHeader);      // Background for buttons and tabs
     const QColor edge(c.border);
 
     QPalette p;
@@ -193,14 +204,14 @@ QPalette Theme::palette(Mode m)
     p.setColor(QPalette::HighlightedText, readableOn(link, m));
     p.setColor(QPalette::PlaceholderText, muted);
 
-    // 立體邊框用的一組灰階
+    // Greys used for bevelled frames
     p.setColor(QPalette::Light, m == Dark ? QColor(0x2a, 0x2a, 0x2a) : QColor(0xff, 0xff, 0xff));
     p.setColor(QPalette::Midlight, m == Dark ? QColor(0x22, 0x22, 0x22) : QColor(0xf2, 0xf2, 0xf2));
     p.setColor(QPalette::Mid, edge);
     p.setColor(QPalette::Dark, edge);
     p.setColor(QPalette::Shadow, m == Dark ? QColor(0x00, 0x00, 0x00) : QColor(0x8c, 0x8c, 0x8c));
 
-    // 停用狀態仍需看得見（WCAG 對非文字元素的 3:1）
+    // Disabled state must still be visible (WCAG 3:1 for non-text)
     p.setColor(QPalette::Disabled, QPalette::WindowText, muted);
     p.setColor(QPalette::Disabled, QPalette::Text, muted);
     p.setColor(QPalette::Disabled, QPalette::ButtonText, muted);

@@ -11,26 +11,38 @@ class QFrame;
 class QRubberBand;
 class QStackedWidget;
 
-/// 會偵測「把分頁拖出分頁列」的 QTabBar。
+/// A QTabBar that detects a tab being dragged out of the bar.
 ///
-/// QTabBar 內建的拖曳只能在同一列內重新排序。要支援拖到別的面板、或拖到邊緣
-/// 自動分割，必須在游標離開分頁列時自己發起一個 QDrag。
+/// QTabBar's built-in drag only reorders within the same bar. Dragging to
+/// another pane, or to an edge to split, requires starting a QDrag by hand once
+/// the cursor leaves the bar.
 class PaneTabBar : public QTabBar
 {
     Q_OBJECT
 
 public:
-    /// 同一程序內的拖曳識別；實際的來源資訊記在 DocumentArea，
-    /// 不把指標塞進 mime data。
+    /// Marks an in-process tab drag. The actual source is recorded in
+    /// DocumentArea rather than smuggled through the mime data as a pointer.
     static const char *mimeType() { return "application/x-markdown-tool-tab"; }
 
     using QTabBar::QTabBar;
 
+    /// Upper bound on a single tab's width, in logical pixels.
+    ///
+    /// setElideMode() alone is not enough: Qt only elides once the whole bar
+    /// overflows, so a single long title still stretches its tab across the
+    /// pane. Capping tabSizeHint() makes the elide kick in per tab.
+    ///
+    /// 中：單靠 setElideMode 不夠，Qt 只在整條分頁列塞不下時才截斷。
+    static constexpr int MaxTabWidth = 220;
+    static constexpr int MinTabWidth = 80;
+
 Q_SIGNALS:
-    /// 分頁被拖出分頁列，準備開始跨面板拖曳。
+    /// A tab was dragged out of the bar; a cross-pane drag is starting.
     void tabDragOut(int index);
 
 protected:
+    QSize tabSizeHint(int index) const override;
     void mousePressEvent(QMouseEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
 
@@ -40,12 +52,14 @@ private:
     bool m_dragging = false;
 };
 
-/// 一個分割面板：自己的分頁列 + 自己的文件堆疊。
+/// One split pane: its own tab bar over its own stack of documents.
 ///
-/// 對應 VS Code 的 editor group —— 一份文件屬於某一個面板，面板上方的分頁列
-/// 只列出屬於它的文件。這樣「哪個分頁對應哪一格」在畫面上是自明的。
+/// This is VS Code's editor group — a document belongs to exactly one pane and
+/// the bar above a pane lists only that pane's documents, which is what makes
+/// "which tab belongs to which pane" self-evident on screen.
 ///
-/// 文件的所有權在這裡：addView() 收下，takeView() 交出（給另一個面板）。
+/// Document ownership lives here: addView() takes it, takeView() hands it to
+/// another pane.
 class PaneGroup : public QWidget
 {
     Q_OBJECT
@@ -63,41 +77,42 @@ public:
     int indexOfPath(const QString &absolutePath) const;
     QStringList paths() const;
 
-    /// 收下一份文件並新增分頁；回傳它的索引。
+    /// Takes ownership of a document and adds a tab; returns its index.
     int addView(DocumentView *view);
-    /// 交出一份文件（移除分頁但不刪除物件），給另一個面板用。
+    /// Gives up a document (removes the tab without deleting) for another pane.
     DocumentView *takeView(int index);
-    /// 移除並刪除。
+    /// Removes and deletes.
     void removeView(int index);
 
-    /// 重新整理某份文件的分頁標題（標題來自文件的 H1）。
+    /// Refreshes a document's tab text (the title comes from its H1).
     void refreshTabText(DocumentView *view);
 
-    /// 作用中的面板會在分頁列下方顯示一條強調色細線。
-    /// multiPane 為 false（沒有分割）時不顯示 —— 只有一格時標示它是多餘的。
+    /// The active pane shows a thin accent line under its tab bar.
+    /// With multiPane false (no split) it is hidden — marking the only pane is
+    /// pointless.
     void applyTheme(Theme::Mode mode);
     void setActive(bool active, bool multiPane);
     bool isActive() const { return m_active; }
-    /// 強調線是否正在顯示（供測試驗證）
+    /// Whether the accent line is currently shown (for tests)
     bool isActiveIndicatorVisible() const;
 
     PaneTabBar *tabBar() const { return m_tabBar; }
 
-    /// 拖曳放置區：中間 = 移入這一格，左右兩側 = 在該側新開一格。
+    /// Drop zones: the middle merges into this pane, the sides split there.
     enum class DropZone { Into, SplitLeft, SplitRight };
     static DropZone zoneFor(const QRect &paneRect, const QPoint &pos);
 
 Q_SIGNALS:
-    /// 使用者在這個面板裡操作了（點分頁、點內容），應該把它設為作用中面板。
+    /// The user interacted with this pane; it should become the active one.
     void activated();
     void currentChanged();
     void tabsChanged();
     void closeRequested(int index);
-    /// 分頁被拖出這個面板的分頁列
+    /// A tab was dragged out of this pane's bar
     void tabDragOut(int index);
-    /// 有分頁被放到這個面板上
+    /// A tab was dropped on this pane
     void tabDropped(PaneGroup *target, PaneGroup::DropZone zone);
-    /// 在某個分頁上按右鍵
+    /// A tab was right-clicked
     void tabContextMenuRequested(int index, const QPoint &globalPos);
 
 protected:

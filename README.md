@@ -1,31 +1,35 @@
 # markdown-tool
 
-極簡 markdown 檢視器。**md4c + QTextBrowser，沒有瀏覽器引擎、沒有 JS。**
+> **English** · [繁體中文](README.zh-TW.md)
 
-起因是 Chrome extension「Markdown Reader」的 content script 單檔 5.8MB JS
-加 0.98MB CSS，每開一個 `.md` 分頁就整包載入 Chromium renderer。
+A minimal markdown viewer. **md4c + QTextBrowser — no browser engine, no JavaScript.**
 
-## 設計要點
+It started because the Chrome extension "Markdown Reader" ships a 5.8 MB content script plus
+0.98 MB of CSS, all of which is loaded into a Chromium renderer for every `.md` tab you open.
 
-- **顯示**：`QTextBrowser`（QTextDocument 富文字引擎）。刻意排除 QtWebEngine：
-  它會 plateau 在 150–250MB，而所有可調參數每項只省 10–20MB。
-  理由詳見 `docs/superpowers/specs/2026-08-31-markdown-tool-design.md`。
-- **解析**：自寫 md4c callback renderer，單趟完成 mermaid fence 攔截、
-  GitHub 風格 heading anchor、圖片相對路徑解析、Qt rich-text 子集相容處理。
-- **mermaid**：外部 `mmdc` 渲染成 **PNG** 後以 sha1 快取在
-  `~/.cache/markdown-tool/mermaid/`。渲染佇列刻意序列化（同時只跑一個），
-  因為每次 mmdc 會拉起一個 headless Chromium（實測峰值約 106MB）。
-  `mmdc` 不在時退回顯示原始碼，不視為錯誤。
+## Design
 
-  **為什麼是 PNG 而不是 SVG**：原本設計走 SVG，但 Qt 的 `QSvgRenderer` 只支援
-  SVG Tiny 1.2、不支援 `<marker>`，實測結果是 mermaid 的**連線與箭頭整批消失**、
-  文字被畫到方框上緣、原點殘留黑色三角形。量化證據：兩節點之間的中央帶深色
-  像素數，SVG 經 Qt 是 **0**，PNG 經 Chromium 是 **249**。
-  由 `svgOutputLosesEdgesInQt()` 這支測試盯住 —— Qt 哪天修好了它會失敗。
-- **可換引擎**：`IRenderBackend` 是刻意留的接縫。若 Qt 的 CSS 子集不夠用，
-  改成 litehtml 只需新增一個實作。
+- **Display**: `QTextBrowser`, Qt's `QTextDocument` rich-text engine. QtWebEngine was deliberately
+  ruled out: it plateaus at 150–250 MB and every tuning knob available saves only 10–20 MB.
+  The reasoning is written up in
+  `docs/superpowers/specs/2026-08-31-markdown-tool-design.md`.
+- **Parsing**: a hand-written md4c callback renderer that intercepts mermaid fences, generates
+  GitHub-style heading anchors, resolves relative image paths and rewrites the constructs Qt's
+  rich text cannot render — all in one pass.
+- **Mermaid**: rendered by the external `mmdc` to **PNG** and cached by SHA-1 under
+  `~/.cache/markdown-tool/mermaid/`. The render queue is deliberately serialised: each mmdc run
+  starts a headless Chromium (measured peak around 106 MB). When `mmdc` is absent the diagram is
+  shown as a code block — that is a degrade path, not an error.
 
-## 建置
+  **Why PNG and not SVG**: Qt's `QSvgRenderer` implements SVG Tiny 1.2, which has no `<marker>`.
+  Rendering mermaid's SVG through Qt loses **every connector and arrowhead**, puts node labels at
+  the top edge of their boxes and leaves a stray black triangle at the origin. Measured, counting
+  dark pixels in the band between two nodes: **0** via Qt's SVG, **249** via Chromium's PNG.
+  `svgOutputLosesEdgesInQt()` guards this — if a future Qt supports `<marker>`, that test fails.
+- **Swappable engine**: `IRenderBackend` is a deliberate seam. If Qt's CSS subset ever proves
+  insufficient, a litehtml backend is one new implementation away.
+
+## Build
 
 ```
 sudo apt install cmake g++-12 qt6-base-dev qt6-svg-dev \
@@ -33,211 +37,216 @@ sudo apt install cmake g++-12 qt6-base-dev qt6-svg-dev \
 ./build.sh
 ```
 
-`build.sh` 固定用 `g++-12`：Ubuntu 22.04 的 libstdc++6 執行期是 12.x，
-Qt 6.2.4 對著它建，用預設 `g++-11` 連結會缺 `GLIBCXX_3.4.30`。
+`build.sh` pins `g++-12`: Ubuntu 22.04's libstdc++6 runtime is 12.x, Qt 6.2.4 is built against it,
+and linking with the default `g++-11` fails on a missing `GLIBCXX_3.4.30`.
 
-mermaid 支援需要：
+Mermaid support additionally needs:
 
 ```
 npm i -g @mermaid-js/mermaid-cli
 ```
 
-## 使用
+## Usage
 
 ```
 ./build/markdown-tool docs/sample.md
 ```
 
-| 快捷鍵 | 動作 |
+| Shortcut | Action |
 |---|---|
-| `Ctrl+L` | **聚焦路徑列**（全選，可直接覆寫） |
-| `Ctrl+W` | 關閉分頁 |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 下一個／上一個分頁 |
-| `Alt+1`…`Alt+9` | 跳到第 N 個分頁 |
-| `Ctrl+Shift+1`…`4` | 面板數（1 = 不分割）|
-| `Ctrl+Shift+←` / `→` | 把分頁搬到左／右邊的面板 |
-| `Ctrl+O` | 用檔案對話框開啟 |
-| `F5` | 重新載入 |
-| `F9` | 側邊欄顯示／隱藏 |
-| `Alt+Shift+1` | 白色主題 |
-| `Alt+Shift+2` | 黑色主題 |
-| `Alt+Shift+T` | 切換主題 |
-| `Ctrl+=` / `Ctrl++` | 放大字型 |
-| `Ctrl+-` | 縮小字型 |
-| `Ctrl+0` | 原始大小 |
+| `Ctrl+L` | **Focus the path bar** (selects all, so you can just type over it) |
+| `Ctrl+O` | Open via file dialog |
+| `F5` | Reload |
+| `Ctrl+W` | Close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Alt+1`…`Alt+9` | Jump to tab N |
+| `Ctrl+Shift+1`…`4` | Pane count (1 = no split) |
+| `Ctrl+Shift+←` / `→` | Move the tab to the left / right pane |
+| `F9` | Show / hide the sidebar |
+| `Alt+Shift+1` | White theme |
+| `Alt+Shift+2` | Black theme |
+| `Alt+Shift+T` | Toggle theme |
+| `Ctrl+=` / `Ctrl++` | Zoom in |
+| `Ctrl+-` | Zoom out |
+| `Ctrl+0` | Original size |
 
-### 路徑列
+The interface itself is in 繁體中文.
 
-視窗最上方是可編輯的路徑列，行為比照瀏覽器的網址列：
+### Path bar
 
-- `Ctrl+L` 聚焦並全選，直接打新路徑後 Enter 開啟
-- 輸入**資料夾**會切到側邊欄的「檔案」分頁並換根，而不是把資料夾當 markdown 開
-- 支援 `~` 展開、相對路徑（相對目前檔案所在目錄）、以及貼上 `file://` URL
-- 自動完成由 `QFileSystemModel` 提供
-- `Esc` 還原成目前檔案的路徑並把焦點交回內容區
-- 路徑不存在時只在狀態列說明，不會關掉目前開著的文件
+The bar across the top behaves like a browser's address bar:
 
-### 分頁與分割面板
+- `Ctrl+L` focuses it and selects all; type a path and press Enter
+- Entering a **directory** switches the sidebar to its Files tab and re-roots there, rather than
+  trying to open the directory as markdown
+- Accepts `~`, paths relative to the current document, and pasted `file://` URLs
+- Completion comes from `QFileSystemModel`
+- `Escape` restores the current path and returns focus to the document
+- A path that does not exist is reported in the status bar; the open document is left alone
 
-VS Code 的 editor group 模型：**每個分割面板有自己的分頁列**，一份文件屬於其中
-一格。這樣「哪個分頁對應哪一格」在畫面上是自明的。作用中的那一格會在分頁列
-下方顯示一條強調色細線（只有一格時不顯示）。
+### Tabs and split panes
 
-分頁的選取狀態用三個線索拉開：**選取中**是頁面底色 + 正文色 + 粗體 + 頂端強調線，
-**未選取**沉一階底色 + 次要色文字。QTabBar 預設的選取狀態只差一點點底色，
-會看不出焦點在哪。
+VS Code's editor group model: **every split pane has its own tab bar**, and a document belongs to
+exactly one pane. That is what makes "which tab is in which pane" self-evident. The active pane
+shows a thin accent line under its tab bar (hidden when there is only one pane).
 
-分頁上按**右鍵**有：關閉、關閉其他、關閉右側全部、關閉這一格、移到左／右邊面板。
+Tab selection is separated by three cues at once: **selected** is the page background plus body
+text, bold, with a top accent line; **unselected** sits one step back with secondary text.
+`QTabBar`'s default selected state differs by only a faint shade, which is not enough to see where
+focus is. A single tab is also capped in width, so one long title cannot stretch across the pane.
 
-分割的產生方式有三種：
+There are three ways to split:
 
-1. 選單／`Ctrl+Shift+1..4` 選面板數
-2. `Ctrl+Shift+←/→` 把目前分頁搬到相鄰面板（沒有就新建一格）
-3. **把分頁拖到某一格的左右邊緣** —— 自動在該側開一格；拖到中間則是併入該格
+1. The menu, or `Ctrl+Shift+1..4`, to choose a pane count
+2. `Ctrl+Shift+←/→` to move the current tab to the neighbouring pane (creating one if needed)
+3. **Dragging a tab to a pane's left or right edge** — it splits on that side; dropping in the
+   middle merges it into that pane instead
 
-空掉的面板會自動收掉，面板上限 4 格。並排**不同步捲動、也不標示差異**。
+Empty panes are removed automatically, and there are at most 4. Panes are **not** scroll-synced and
+differences are **not** highlighted; this is side-by-side reading, not a diff tool.
 
-連結導航**在同一個分頁內換檔**，不開新分頁：像 `INDEX.md` 那種有幾十個連結的
-索引頁，每點一次新增一個分頁很快就爆掉。要另開分頁請用路徑列、檔案樹或拖曳。
+Right-clicking a tab offers: close, close others, close all to the right, close this pane, move to
+the right pane, move to the left pane.
 
-### 拖曳
+Link navigation **replaces the content of the same tab** rather than opening a new one: an index
+page with dozens of links would otherwise spawn dozens of tabs. New tabs come from the path bar,
+the file tree or drag and drop.
 
-把 markdown 檔或資料夾拖進視窗即可開啟／換根，與路徑列走同一條路徑。
-一次拖多個時**優先開 markdown 檔**，沒有檔案才收資料夾。
+### Drag and drop
 
-### 側邊欄
+Drop a markdown file or a directory on the window to open or re-root. When several items are
+dropped at once, **a markdown file wins** over a directory.
 
-兩個分頁：**段落**（標題樹，隨捲動高亮）與**檔案**（只顯示資料夾與
-markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置。
+### Sidebar
 
-## 排版
+Two tabs: **Paragraphs** (the heading tree, which highlights the heading you are currently reading)
+and **Files** (directories and markdown-like files only). Editing the open file externally reloads
+it and preserves the scroll position.
 
-樣式基準是拿 Chrome extension「Markdown Reader」的實際 computed style 比對出來的
-（用本機 HTTP 伺服器餵同一份 `docs/sample.md` 給它，再抓 `getComputedStyle`）：
+## Typography
 
-| 元素 | 處理 |
+The baseline was taken by measuring the Chrome extension's actual computed styles — serving the
+same `docs/sample.md` to it over a local HTTP server and reading `getComputedStyle` — rather than
+by eye.
+
+| Element | Treatment |
 |---|---|
-| 行內 `` `code` `` | 專屬洋紅色 + 底色 chip + 等寬字 |
-| 連結 | 連結色 + **底線**（不只靠顏色區分） |
-| H1 / H2 | 底部 1px 分隔線（自繪，見下） |
-| 引用區塊 | 左側 4px 色條（自繪），連續段落合併成一條 |
-| 表格 | 只有橫線（`borderCollapse` + 每列上框線）、表頭下方加粗、`cellPadding=8` |
-| 巢狀清單 | `setIndentWidth(20)` |
-| 標題字級 | H1→H6 為 23/17/14/12.5/11.5/11pt，正文 11pt；H6 用次要色 |
-| 行高 | 155%（Qt 預設約單行，中文太擠）；程式碼區塊同值 |
-| 字型縮放 | 每階 1.1 倍，範圍 0.5×–3×；標題與內文等比縮放 |
-| 段距 | 段落上下各 10px；清單項目 0、清單整體上下 4px |
+| Inline `` `code` `` | Its own magenta, a background chip, monospace |
+| Links | Link colour plus an **underline** (not colour alone) |
+| H1 / H2 | A 1px rule underneath, painted by hand |
+| Blockquote | A 4px bar on the left, painted by hand; consecutive paragraphs share one bar |
+| Tables | Horizontal rules only (`borderCollapse` plus per-row top borders), heavier under the header |
+| Nested lists | `setIndentWidth(20)` |
+| Heading sizes | 23 / 17 / 14 / 12.5 / 11.5 / 11 pt against 11 pt body; H6 uses the secondary colour |
+| Line height | 155% (Qt's default is roughly single spacing, cramped for CJK); code blocks match |
+| Zoom | 1.1 per step, 0.5×–3×; headings and body scale together |
+| Paragraph spacing | 10px above and below; list items 0, lists 4px |
 
-行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
-「這是程式碼」還是「這是可點的連結」。另外區分也不只靠顏色：連結有底線、
-行內 code 有 chip 與等寬字。
+**Font sizes are never set through CSS.** Body size comes from
+`QTextDocument::setDefaultFont()` and heading sizes from an explicit tree walk. Measured, a
+stylesheet's `body { font-size }` has **no effect at all** on a QTextDocument, and for headings the
+`QTextFormat::FontSizeAdjustment` property overrides `FontPointSize` whenever it is present — even
+when set to 0 — which had H5 rendering *smaller than body text*. The walk clears that property
+(setting it to 0 is not enough). `Theme::headingPointSize()` is the single definition, guarded by
+`headingSizesFollowThemeScale()`.
 
-**字級一律不用 CSS 設。** 正文用 `QTextDocument::setDefaultFont()`，標題用
-`applyHeadingScale()` 明確指定。stylesheet 裡的 `body { font-size }` 實測對
-QTextDocument **完全沒有生效** —— 內文一直是 widget 的系統預設字級（這台 9pt）。
+**Heading rules and the blockquote bar are painted by hand**, because Qt rich text has no
+block-level `border`. `MdTextBrowser::paintEvent()` adds them after the text and scans only the
+visible block range. Blockquotes are identified by `blockFormat().leftMargin()` matching
+`Theme::BlockquoteIndentPx` — a constant shared by the stylesheet and the painter, which
+`blockquoteMarkerContractHolds()` pins. List items are excluded because they have a `textList()`,
+headings because their left margin is 0.
 
-**標題字級不是用 CSS 設的。** `QTextFormat::FontSizeAdjustment` 這個屬性只要存在
-（即使值是 0），Qt 就完全忽略 `FontPointSize`，改用「預設字級 × 層級係數」——
-實測 H1 設 23pt 卻畫成 18pt、**H5 設 11.5pt 卻畫成 7.2pt，比正文還小**。
-修法是在 `applyHeadingScale()` 裡 `clearProperty()` 掉它（設成 0 沒有用），
-再明確指定字級。`Theme::headingPointSize()` 是唯一定義處，由
-`headingSizesFollowThemeScale()` 盯住（含「階層必須嚴格遞減」與
-「H6 不得小於正文」）。
+## Theming
 
-**標題分隔線與引用色條是自繪的**，因為 Qt rich-text 不支援 block 層級的
-`border-bottom` / `border-left`。`MdTextBrowser::paintEvent()` 在文字畫完後補上，
-只掃可見範圍的 block。引用區塊的辨識靠 `blockFormat().leftMargin()` 等於
-`Theme::BlockquoteIndentPx` —— 那個常數同時被 CSS 與繪製程式碼使用，是明確的契約，
-由 `blockquoteMarkerContractHolds()` 盯住（清單項目有 `textList()`、
-標題的 `leftMargin` 是 0，所以不會誤判）。
+Two themes: **white** (`#ffffff`) and **black** (`#000000`), **black by default**.
 
-## 主題與對比
+The theme is applied unconditionally at startup rather than only on a switch. Otherwise the whole
+application keeps the system GTK palette and clashes with the document colours — observed as a
+slate-blue window that was neither theme.
 
-兩套主題：**白色**（`#ffffff`）與**黑色**（`#000000`），**預設黑色**。
+Contrast is a hard requirement, not an aesthetic preference. Every pair is computed as a WCAG 2.1
+ratio and pinned by tests: body text ≥ 7:1, secondary text and links ≥ 4.5:1, non-text elements
+such as borders ≥ 3:1. `tests/test_theme.cpp` checks the theme colours, every `QPalette` role, the
+tab states and every syntax-highlighting colour (208 pairs, extracted from real generated HTML).
 
-主題在啟動時就無條件套用一次（不是等使用者切換才套）。否則整個 app 會沿用系統
-GTK 主題的底色，跟文件內容的主題對不起來 —— 實際踩過：視窗是深藍灰色，
-既不是白色也不是黑色。
+Because markdown may embed arbitrary HTML, correct palette choices are not enough on their own.
+Two runtime protections back them up:
 
-對比是硬性要求而非美感偏好，全部用 WCAG 2.1 相對亮度計算並由測試釘住門檻：
-正文 ≥ 7:1、次要文字與連結 ≥ 4.5:1、框線等非文字元素 ≥ 3:1。
-`tests/test_theme.cpp` 會檢查主題配色、`QPalette` 的每一組 role、
-以及所有語言的語法高亮顏色（實際產出 HTML 後逐一抽出來算，共 208 組）。
+1. **Text contrast fixup** — for each fragment, the WCAG ratio against its *effective* background
+   (fragment → block → page) is computed, and anything below 4.5:1 has its foreground replaced with
+   a colour readable there. This is what rescues `<span style="color:#000000">` on the black theme.
+2. **Low-contrast image backdrop** — a transparent image whose content is too close in brightness
+   to the page is composited onto a neutral card. Mermaid is exempt; its theme already matches.
 
-除了「配色本身合格」，還有兩道執行期的保護，因為 markdown 可以內嵌任意 HTML：
+The "對比保護" section of `docs/sample.md` is the corpus for these cases, and
+`everyTextFragmentIsReadableInBothThemes()` sweeps the whole document in both themes.
 
-1. **文字對比修正**：算每個文字片段與其**實際背景**（片段背景 → block 背景 →
-   頁面底色）的對比，不足 4.5:1 就換成該背景上讀得到的顏色。這救的是
-   `<span style="color:#000000">` 這類寫死顏色在黑色主題下隱形的情況。
-2. **低對比圖片墊底**：透明背景的圖片若內容亮度與頁面底色太接近，會墊一層
-   中性底色。mermaid 不走這條 —— 它的主題由我們指定，本來就與頁面相符。
+A trap worth recording: setting only `Window`, `Base` and `Text` on the `QPalette` is not enough.
+`QTabBar` and `QMenuBar` paint with `Button`/`ButtonText`, so on the black theme that produced
+invisible tab labels and an invisible menu bar. Every role is set now, guarded by
+`paletteHasNoDefaultLightRolesInBlackTheme()`.
 
-`docs/sample.md` 的「對比保護」章節就是這幾種情況的語料，
-`everyTextFragmentIsReadableInBothThemes()` 會在兩個主題下掃全文件驗證。
+## Performance
 
-踩過的坑：`QPalette` 只設 `Window`/`Base`/`Text` 是不夠的。`QTabBar` 與
-`QMenuBar` 會用預設的 `Button`/`ButtonText`（淺色系）去畫，黑色主題下就變成
-隱形的分頁標籤與隱形選單列。現在 role 設滿，並由
-`paletteHasNoDefaultLightRolesInBlackTheme()` 盯住。
+Mutations in the document tree walks (image sizing, heading scale, table styling, contrast fixup)
+**must** be wrapped in a single `beginEditBlock()`/`endEditBlock()`, and the document must have undo
+disabled (`setUndoRedoEnabled(false)`). Without both, every `setCharFormat` or `setFormat` triggers
+a full re-layout and pushes an undo command, which is quadratic in the number of cells or fragments.
 
-`docs/sample.md` 涵蓋所有 v0.1 該處理的語法，`docs/headings.md` 專門涵蓋
-H1–H6 的層級（含標題緊接標題、標題內含行內樣式），兩份都用來手動驗收。
+Measured: a 6.9 KB, 72-line file containing a 65-row table (325 cells) took **2146 ms** to open
+before the fix and **23 ms** after. `wideTableOpensQuickly()` guards it with a synthetic 1505-cell
+table.
 
-## 效能
+## Memory
 
-document tree walk（圖片尺寸、標題字級、表格樣式、對比修正）的修改**必須包在
-單一 `beginEditBlock`/`endEditBlock` 裡**，而且文件要關掉 undo
-（`setUndoRedoEnabled(false)`）。否則每一次 `setCharFormat` / `setFormat` 都會
-觸發一次重新排版，在 cell 或片段多的文件上是二次方級的成本。
+Measured as PSS across the whole process tree (`/proc/<pid>/smaps_rollup`). RSS is not used as the
+headline number because it double-counts shared library pages.
 
-實測：一份 6.9KB、只有 72 行但含 65 列表格（325 個 cell）的文件，
-修復前開檔 **2146ms**，修復後 **23ms**（93 倍）。
-`wideTableOpensQuickly()` 用 1505 個 cell 的合成表格守住這件事。
-
-## 記憶體
-
-量整個行程樹的 PSS（`/proc/<pid>/smaps_rollup`）。RSS 會把共享函式庫頁面
-重複計算，不作為結論。
-
-| 情境 | PSS | RSS |
+| Case | PSS | RSS |
 |---|---|---|
-| 三行小檔（基準） | 33.5 MB | 66.4 MB |
-| `docs/sample.md`（含 2 張 mermaid） | 39.0 MB | 82.0 MB |
+| Three-line file (baseline) | 33.5 MB | 66.4 MB |
+| `docs/sample.md` (two mermaid diagrams) | 41.6 MB | 87.1 MB |
+| Three tabs (including the 325-cell table document) | 43.7 MB | 92.2 MB |
 
-其中一個關鍵設定是 `QT_XCB_GL_INTEGRATION=none`（已寫在 `src/main.cpp`）：
-xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，光那一顆就
-**13.2 MB PSS**，而這個 app 全程 raster 繪製、完全不用 OpenGL。設掉之後
-基準從 49.1MB 降到 32.7MB（加入路徑列後為 33.4MB）。
+Extra tabs are cheap — three cost only 2.1 MB more than one. The Qt libraries dominate; each
+`QTextDocument` is comparatively small.
 
-## 測試
+One setting matters a lot: `QT_XCB_GL_INTEGRATION=none`, set in `src/main.cpp`. The xcb QPA's GL
+integration drags in Mesa's llvmpipe and `libLLVM`, **13.2 MB of PSS on its own**, for an
+application that paints entirely through the raster engine. Disabling it took the baseline from
+49.1 MB to 32.7 MB.
+
+## Tests
 
 ```
 ctest --test-dir build --output-on-failure
 ```
 
-139 個測試函式、8 個套件：
+140 test functions across 8 suites:
 
-| 套件 | 函式數 | 內容 |
+| Suite | Functions | Covers |
 |---|---|---|
-| markdownparser | 15 | 錨點規則、mermaid 抽取、轉義、圖片路徑 |
-| codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
-| mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
-| mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
-| theme | 17 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code、分頁狀態 |
-| e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
-| e2e_regression | 29 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
-| e2e_tabs | 27 | 分頁、分割面板、拖曳分割、幾何不變式、右鍵選單、獨立監看 |
+| markdownparser | 15 | Anchors, mermaid extraction, escaping, image paths |
+| codehighlighter | 8 | Per-language colouring, fallback, unterminated strings |
+| mermaidcache | 8 | Key sensitivity, queue serialisation, degrade path |
+| mmdc_integration | 9 | Really runs mmdc; the SVG-vs-PNG connector ink differential |
+| theme | 17 | WCAG thresholds: colours, palette roles, syntax, inline code, tab states |
+| e2e_viewer | 26 | Drives a real MainWindow; path bar, theme and drag-and-drop flows |
+| e2e_regression | 29 | Pins pipeline and styling invariants against sample.md / headings.md |
+| e2e_tabs | 28 | Tabs, split panes, drag-split, geometry invariants, context menu |
 
-e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
-整合測試與 mermaid e2e 會自己 skip，不算失敗。
+The e2e suites run under `QT_QPA_PLATFORM=offscreen`, so no X or Wayland is required. When `mmdc`
+is missing the integration suite and the mermaid e2e test skip themselves rather than failing.
 
-視覺檢查（自動化斷言驗結構，驗不了「看起來對不對」）：
+For visual checks — automated assertions verify structure, not whether something *looks* right:
 
 ```
 MD_E2E_DUMP=/tmp/shots QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
 ```
 
-也可以指定別的文件與段落，方便針對特定樣式重現檢查：
+That writes the top, code, mermaid, table and contrast sections in both themes. A different
+document and set of sections can be aimed at:
 
 ```
 MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
@@ -245,30 +254,43 @@ MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
   QT_QPA_PLATFORM=offscreen ./build/test_e2e_regression
 ```
 
-會輸出白／黑兩個主題下的頂端、程式碼、mermaid、表格、對比保護章節共 10 張 PNG。
+**Not covered automatically**: the real X11 drag gestures (dragging a tab between panes, dropping a
+file on the window). The logic behind both is exercised through `DocumentArea::moveTabToPane()` and
+`MainWindow::openFromUrls()`, and the wiring is asserted separately, but the gesture itself needs a
+human.
 
-## 規格文件
+## Specifications
 
-`openspec/specs/<domain>/spec.md` 是行為的來源真相，依 OpenSpec 慣例撰寫
-（`### Requirement:` / `#### Scenario:` 搭配 GIVEN/WHEN/THEN）。
-每份都有並排的 `spec.zh-TW.md` 中文版，兩份必須同步更新，
-由 `openspec/check-bilingual.sh` 檢查結構是否一致。
+`openspec/specs/<domain>/spec.md` is the source of truth for behaviour, written to the OpenSpec
+conventions (`### Requirement:` / `#### Scenario:` with GIVEN/WHEN/THEN). Each has a
+`spec.zh-TW.md` companion; both must be updated together, and
+`openspec/check-bilingual.sh` checks they stay structurally in step.
 
-| Domain | 範圍 |
+| Domain | Scope |
 |---|---|
-| `markdown-parsing` | md4c callback renderer、錨點、語法高亮、Qt 富文字相容性 |
-| `document-rendering` | QTextBrowser 後端、版面、圖片、對比強制、縮放、效能 |
-| `theming` | 白／黑主題、WCAG 對比保證、palette、分頁狀態 |
-| `mermaid-diagrams` | 外部 mmdc 渲染、PNG 而非 SVG 的決定、快取、退化 |
-| `workspace` | 分頁、分割面板、路徑列、側邊欄、檔案監看、拖放、持久化 |
+| `markdown-parsing` | md4c callback renderer, anchors, highlighting, Qt compatibility |
+| `document-rendering` | QTextBrowser backend, layout, images, contrast, zoom, performance |
+| `theming` | White/black themes, WCAG guarantees, palette, tab states |
+| `mermaid-diagrams` | External mmdc rendering, the PNG-over-SVG decision, cache, degradation |
+| `workspace` | Tabs, split panes, path bar, sidebar, watching, drag and drop, persistence |
 
-`docs/superpowers/specs/2026-08-31-markdown-tool-design.md` 是**開發過程的紀錄**
-（每一輪的決策、量測數字、踩過的坑），與上面的規格互補：規格說「現在是什麼」，
-設計文件說「為什麼變成這樣」。
+`docs/superpowers/specs/2026-08-31-markdown-tool-design.md` is the **development record** — the
+decisions, the measurements, the traps that were hit. The two complement each other: the specs say
+what the behaviour *is*, the design document says *why it ended up that way*.
 
-## 狀態
+## Conventions
 
-v0.1 功能完成，已在真實 X11 與 offscreen 下驗證。
+- **Code comments are English.** A handful of hard-won traps carry a one-line `中：` summary as
+  well, because those are the notes people come back to.
+- **User-facing strings are 繁體中文** — menus, dialogs, the status bar.
+- **Documentation is bilingual**: `README.md` / `README.zh-TW.md` and
+  `spec.md` / `spec.zh-TW.md`. English is canonical, since RFC 2119's SHALL/SHOULD are English
+  keywords.
 
-`docs/superpowers/specs/2026-08-31-markdown-tool-design.md` 第 12 節記錄了
-所有實測結果，包含 SVG 路線失敗的完整證據。
+## Status
+
+v0.2. Verified under both real X11 and offscreen.
+
+Known gap: `.txt` files are parsed as markdown, so a plain-text report gets reflowed into a wall of
+text (soft line breaks are whitespace in markdown). Plain text should keep its line breaks and use
+a monospaced face.

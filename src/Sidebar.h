@@ -5,7 +5,7 @@
 class FileBrowserPanel;
 class TocPanel;
 
-/// 側邊欄：兩個分頁 —— 段落（TOC）與檔案瀏覽。
+/// Sidebar with two tabs: the table of contents and the file browser.
 class Sidebar : public QTabWidget
 {
     Q_OBJECT

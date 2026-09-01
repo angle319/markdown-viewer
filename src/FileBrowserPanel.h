@@ -6,7 +6,8 @@ class QFileSystemModel;
 class QLabel;
 class QTreeView;
 
-/// 側邊欄「檔案」分頁：只顯示資料夾與 markdown 類檔案的檔案樹。
+/// The sidebar's Files tab: a tree showing only directories and markdown-like
+/// files.
 class FileBrowserPanel : public QWidget
 {
     Q_OBJECT
@@ -17,7 +18,7 @@ public:
     void setRoot(const QString &dir);
     QString root() const { return m_root; }
 
-    /// 在樹中選取並捲到該檔案（若在目前根目錄底下）。
+    /// Selects and scrolls to a file, when it is under the current root.
     void selectFile(const QString &path);
 
 Q_SIGNALS:

@@ -23,8 +23,9 @@ DocumentView::DocumentView(MermaidCache *cache, QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_backend->widget());
 
-    // 拖放交給 MainWindow 處理。這裡必須自己關掉 —— 分頁是動態建立的，
-    // MainWindow 在建構時遍歷子 widget 抓不到之後才出現的 view。
+    // Drag and drop is handled by MainWindow. Turning it off has to happen here:
+    // views are created dynamically, so MainWindow's constructor-time sweep over
+    // child widgets never sees the ones that appear later.
     setAcceptDrops(false);
     m_backend->widget()->setAcceptDrops(false);
 
@@ -46,7 +47,8 @@ DocumentView::DocumentView(MermaidCache *cache, QWidget *parent)
 
     if (m_cache) {
         connect(m_cache, &MermaidCache::rendered, this, [this](const QString &key, const QString &) {
-            // 每個 view 都會收到，但只有真的用到那張圖的才需要重畫
+            // Every view is notified, but only the ones actually using that
+            // diagram need to redraw
             for (const MermaidBlock &b : m_doc.mermaid) {
                 if (m_cache->keyFor(b.source, m_mode == Theme::Dark) == key) {
                     m_backend->mermaidReady(key);
@@ -94,7 +96,8 @@ bool DocumentView::openFile(const QString &path)
 void DocumentView::reparse(bool preserveScroll)
 {
     MarkdownParser::Options opt;
-    // mmdc 不在就別產生佔位圖，直接把 mermaid 當程式碼區塊顯示
+    // With no mmdc there is no point emitting placeholders; show the mermaid
+    // source as an ordinary code block instead
     opt.mermaidEnabled = m_cache && m_cache->rendererAvailable();
     opt.darkTheme = (m_mode == Theme::Dark);
 
@@ -126,7 +129,8 @@ void DocumentView::setTheme(Theme::Mode mode)
         return;
     m_mode = mode;
 
-    // 語法高亮的配色是在產 HTML 時決定的，所以主題切換必須重新解析
+    // The syntax-highlighting palette is baked into the HTML at parse time, so
+    // switching theme requires a re-parse
     if (!m_markdown.isEmpty())
         reparse(true);
     else

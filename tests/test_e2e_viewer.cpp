@@ -26,8 +26,8 @@
 #include "Theme.h"
 #include "core/MmdcRenderer.h"
 
-/// e2e：驅動真正的 MainWindow，走使用者實際會走的流程。
-/// 以 offscreen platform 執行，不需要 X/Wayland。
+/// End-to-end: drives a real MainWindow through the flows a user actually
+/// takes. Runs on the offscreen platform, so no X or Wayland is needed.
 class TestE2eViewer : public QObject
 {
     Q_OBJECT
@@ -49,7 +49,7 @@ private slots:
     void themesAreWhiteAndBlack();
     void hardcodedInvisibleColourIsCorrected();
 
-    // --- 路徑列 ---
+    // --- Path bar ---
     void pathBarShowsCurrentFile();
     void pathBarOpensTypedFile();
     void pathBarSwitchesFolderWhenGivenDirectory();
@@ -57,7 +57,7 @@ private slots:
     void pathBarExpandsTildeAndRelativePaths();
     void ctrlLFocusesPathBar();
 
-    // --- 拖曳 ---
+    // --- Drag and drop ---
     void dropOpensMarkdownFile();
     void dropFolderSwitchesFileBrowser();
     void dropIgnoresUnsupportedFile();
@@ -74,8 +74,8 @@ private:
 
     QTextBrowser *browser() const
     {
-        // 多分頁之後不能用 m_win->findChild —— 那會抓到第一個建立的 view，
-        // 不一定是作用中的那個
+        // With tabs, m_win->findChild is wrong: it returns the first view ever
+        // created, which is not necessarily the active one
         DocumentView *v = m_win->activeView();
         return v ? v->findChild<QTextBrowser *>() : nullptr;
     }
@@ -84,7 +84,7 @@ private:
     QTreeView *fileTree() const;
     QAction *actionNamed(const QString &text) const;
 
-    /// 文件中所有圖片片段的顯示尺寸
+    /// Display sizes of every image fragment in the document
     QList<QSize> imageSizes() const;
     int headingBlockCount() const;
 
@@ -246,14 +246,16 @@ static const char *kOtherMd = R"(# 另一份文件
 
 void TestE2eViewer::initTestCase()
 {
-    // 把 QSettings 與 CacheLocation 導向測試專用位置，別污染使用者設定
+    // Redirect QSettings and CacheLocation to a test-only location so the
+    // user's own settings are never touched
     QStandardPaths::setTestModeEnabled(true);
 }
 
 void TestE2eViewer::init()
 {
-    // 每個測試都從冷快取開始：否則前一次跑剩下的 mermaid 快取會讓
-    // 「先佔位圖、畫好再換掉」這條路徑被跳過，測試就驗不到東西。
+    // Every test starts from a cold cache: leftovers from a previous run would
+    // skip the "placeholder first, real image later" path entirely and the test
+    // would verify nothing.
     const QString cacheRoot = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                               + QStringLiteral("/markdown-tool");
     if (QDir(cacheRoot).exists())
@@ -293,8 +295,8 @@ QString TestE2eViewer::fixturePath(const QString &name) const
 
 QTreeView *TestE2eViewer::fileTree() const
 {
-    // TocPanel 用 QTreeWidget（QTreeView 的子類），檔案樹是純 QTreeView，
-    // 所以挑出那個 model 是 QFileSystemModel 的。
+    // TocPanel uses a QTreeWidget (a QTreeView subclass) while the file tree is
+    // a plain QTreeView, so pick the one whose model is a QFileSystemModel.
     for (QTreeView *v : m_win->findChildren<QTreeView *>())
         if (qobject_cast<QFileSystemModel *>(v->model()))
             return v;
@@ -355,7 +357,7 @@ void TestE2eViewer::tocPanelMirrorsHeadingStructure()
     QTreeWidget *tree = tocTree();
     QVERIFY(tree);
 
-    // H1 一個頂層，其下三個 H2，第一個 H2 下有一個 H3
+    // One top-level H1 with three H2 children, and an H3 under the first H2
     QCOMPARE(tree->topLevelItemCount(), 1);
     QTreeWidgetItem *h1 = tree->topLevelItem(0);
     QCOMPARE(h1->text(0), QStringLiteral("主文件標題"));
@@ -366,7 +368,8 @@ void TestE2eViewer::tocPanelMirrorsHeadingStructure()
     QCOMPARE(h1->child(1)->text(0), QStringLiteral("第二節"));
     QCOMPARE(h1->child(2)->text(0), QStringLiteral("第三節"));
 
-    // QTextDocument 也必須把標題保留成 heading block，否則捲動同步會失效
+    // QTextDocument must also keep the headings as heading blocks, or scroll
+    // synchronisation stops working
     QCOMPARE(headingBlockCount(), 5);
 }
 
@@ -396,7 +399,7 @@ void TestE2eViewer::scrollingUpdatesTocHighlight()
     browser()->verticalScrollBar()->setValue(browser()->verticalScrollBar()->maximum());
     QTRY_VERIFY2(tree->currentItem() != nullptr, "捲到底部後 TOC 沒有高亮任何項目");
 
-    // 捲到底應該落在最後一個標題（第三節）
+    // Scrolled to the bottom, the last heading should be current
     QCOMPARE(tree->currentItem()->text(0), QStringLiteral("第三節"));
 
     browser()->verticalScrollBar()->setValue(0);
@@ -416,7 +419,7 @@ void TestE2eViewer::fileBrowserRootFollowsOpenedFileAndFiltersToMarkdown()
     QVERIFY(root.isValid());
     QCOMPARE(model->filePath(root), QFileInfo(m_dir->path()).absoluteFilePath());
 
-    // QFileSystemModel 是非同步填充的
+    // QFileSystemModel populates asynchronously
     QTRY_COMPARE(model->rowCount(root), 3);   // main.md / other.md / notes.txt
 
     QStringList names;
@@ -461,7 +464,8 @@ void TestE2eViewer::relativeMarkdownLinkNavigates()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
-    // onLinkActivated 是 private slot，但仍在 meta-object 裡，可用名稱呼叫
+    // onLinkActivated is a private slot but still in the meta-object, so it can
+    // be invoked by name
     QVERIFY(QMetaObject::invokeMethod(m_win.data(), "onLinkActivated",
                                       Q_ARG(QUrl, QUrl(QStringLiteral("other.md")))));
 
@@ -479,7 +483,7 @@ void TestE2eViewer::anchorLinkScrollsWithinDocument()
                                       Q_ARG(QUrl, QUrl(QStringLiteral("#第三節")))));
 
     QTRY_VERIFY2(browser()->verticalScrollBar()->value() > 0, "錨點連結沒有捲動");
-    // 標題應停留在原本的文件裡，不是開了新檔
+    // The title should stay on the same document; no new file was opened
     QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
 }
 
@@ -491,7 +495,8 @@ void TestE2eViewer::themeSwitchKeepsTocAndScroll()
     QAction *white = actionNamed(QStringLiteral("白色主題"));
     QVERIFY(black && white);
 
-    // 明確設定起始主題，不要假設預設值（預設已改為黑色）
+    // Set the starting theme explicitly rather than assuming the default, which
+    // is now black
     white->trigger();
 
     browser()->verticalScrollBar()->setValue(120);
@@ -519,7 +524,7 @@ void TestE2eViewer::themesAreWhiteAndBlack()
     actionNamed(QStringLiteral("黑色主題"))->trigger();
     QTRY_COMPARE(browser()->palette().color(QPalette::Base), QColor(Qt::black));
 
-    // 切換主題的捷徑動作也要能來回
+    // The toggle action must work in both directions too
     QAction *toggle = actionNamed(QStringLiteral("切換主題"));
     QVERIFY(toggle);
     toggle->trigger();
@@ -530,7 +535,8 @@ void TestE2eViewer::themesAreWhiteAndBlack()
 
 void TestE2eViewer::hardcodedInvisibleColourIsCorrected()
 {
-    // 內嵌原始 HTML 寫死純黑；在黑色主題下必須被改掉，否則就是隱形文字
+    // Raw HTML hard-coding pure black. On the black theme it must be rewritten,
+    // or the text is invisible
     writeFile(QStringLiteral("invisible.md"),
               QStringLiteral("# 對比\n\n<span style=\"color:#000000\">隱形候選</span>\n"));
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("invisible.md"))));
@@ -556,7 +562,7 @@ void TestE2eViewer::hardcodedInvisibleColourIsCorrected()
     QVERIFY2(found, "找不到那段文字");
 }
 
-// ------------------------------------------------------------------ 路徑列
+// ----------------------------------------------------------------- Path bar
 
 void TestE2eViewer::pathBarShowsCurrentFile()
 {
@@ -580,7 +586,7 @@ void TestE2eViewer::pathBarOpensTypedFile()
 
     QTRY_VERIFY2(m_win->windowTitle().startsWith(QStringLiteral("另一份文件")),
                  qPrintable(m_win->windowTitle()));
-    // 開檔後路徑列要跟著更新
+    // The path bar must follow after opening
     QCOMPARE(bar->path(), fixturePath(QStringLiteral("other.md")));
 }
 
@@ -595,12 +601,13 @@ void TestE2eViewer::pathBarSwitchesFolderWhenGivenDirectory()
     edit->setText(m_dir->path() + QStringLiteral("/sub"));
     QTest::keyClick(edit, Qt::Key_Return);
 
-    // 應切到「檔案」分頁並換根，而不是嘗試把資料夾當 markdown 開
+    // It should switch to the Files tab and re-root, not try to open the
+    // directory as markdown
     QTRY_COMPARE(sidebar()->currentIndex(), 1);
     auto *model = qobject_cast<QFileSystemModel *>(fileTree()->model());
     QTRY_COMPARE(model->filePath(fileTree()->rootIndex()),
                  QFileInfo(m_dir->path() + QStringLiteral("/sub")).absoluteFilePath());
-    // 原本的文件沒被關掉
+    // The current document stays open
     QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
 }
 
@@ -620,7 +627,7 @@ void TestE2eViewer::pathBarReportsMissingPathWithoutCrashing()
 
 void TestE2eViewer::pathBarExpandsTildeAndRelativePaths()
 {
-    // 純邏輯，不需要真的開檔
+    // Pure logic; no file needs to be opened
     QCOMPARE(PathBar::resolveInput(QStringLiteral("~"), QString()), QDir::homePath());
     QCOMPARE(PathBar::resolveInput(QStringLiteral("~/x.md"), QString()),
              QDir::homePath() + QStringLiteral("/x.md"));
@@ -650,20 +657,21 @@ void TestE2eViewer::ctrlLFocusesPathBar()
     QTRY_VERIFY2(edit->hasFocus(), "Ctrl+L 沒把焦點給路徑列");
     QVERIFY2(!edit->selectedText().isEmpty(), "聚焦後沒有全選，覆寫路徑會很麻煩");
 
-    // Esc 還原並把焦點交回內容區
+    // Escape restores the path and hands focus back to the document
     edit->setText(QStringLiteral("/tmp/whatever.md"));
     QTest::keyClick(edit, Qt::Key_Escape);
     QCOMPARE(edit->text(), fixturePath(QStringLiteral("main.md")));
 }
 
-// -------------------------------------------------------------------- 拖曳
+// ----------------------------------------------------------- Drag and drop
 
-/// 模擬拖入一組路徑。
+/// Simulates dropping a set of paths.
 ///
-/// 走 openFromUrls() 而不是合成 QDropEvent：QWidget::event() 是 protected，
-/// 而 QApplication::notify 對拖放另有一套經過 QDragManager 的流程，
-/// 在測試裡送不到 dropEvent。dropEvent 本身只是 openFromUrls 的薄轉接，
-/// 「視窗接受拖放、子 widget 不攔截」則另外用 acceptDrops 斷言。
+/// Goes through openFromUrls() rather than synthesising a QDropEvent:
+/// QWidget::event() is protected and QApplication::notify routes drag and drop
+/// through QDragManager, so a synthetic event never reaches dropEvent in a test.
+/// dropEvent is itself a thin adapter over openFromUrls; that the window accepts
+/// drops and child widgets do not intercept them is asserted separately.
 static void sendDrop(MainWindow *win, const QStringList &paths)
 {
     QList<QUrl> urls;
@@ -677,7 +685,7 @@ void TestE2eViewer::dropOpensMarkdownFile()
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
     QVERIFY2(m_win->acceptDrops(), "視窗沒有開啟拖放");
 
-    // 子 widget 若自己收下 drop，事件就冒泡不到 MainWindow
+    // A child that accepts the drop stops it bubbling up to MainWindow
     QVERIFY2(!browser()->acceptDrops(), "QTextBrowser 會攔截 drop");
     QVERIFY2(!sidebar()->acceptDrops(), "側邊欄會攔截 drop");
     for (QWidget *w : sidebar()->findChildren<QWidget *>())
@@ -689,7 +697,7 @@ void TestE2eViewer::dropOpensMarkdownFile()
 
     QTRY_VERIFY2(m_win->windowTitle().startsWith(QStringLiteral("另一份文件")),
                  qPrintable(m_win->windowTitle()));
-    // 路徑列要跟著更新
+    // The path bar must follow
     QCOMPARE(m_win->findChild<PathBar *>()->path(),
              fixturePath(QStringLiteral("other.md")));
 }
@@ -706,7 +714,7 @@ void TestE2eViewer::dropFolderSwitchesFileBrowser()
     auto *model = qobject_cast<QFileSystemModel *>(fileTree()->model());
     QTRY_COMPARE(model->filePath(fileTree()->rootIndex()),
                  QFileInfo(m_dir->path() + QStringLiteral("/dropped")).absoluteFilePath());
-    // 資料夾不該被當成 markdown 開掉目前的文件
+    // A directory must not replace the current document as if it were markdown
     QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
 }
 
@@ -728,7 +736,7 @@ void TestE2eViewer::firstUsablePathPrefersMarkdownOverFolder()
     QVERIFY(QDir().mkpath(m_dir->path() + QStringLiteral("/adir")));
     const QString dir = m_dir->path() + QStringLiteral("/adir");
 
-    // 一次拖多個時，開檔比換資料夾更符合預期
+    // With several items dropped, opening a file beats re-rooting
     QCOMPARE(MainWindow::firstUsablePath({ QUrl::fromLocalFile(dir),
                                            QUrl::fromLocalFile(md) }),
              QFileInfo(md).absoluteFilePath());
@@ -744,8 +752,8 @@ void TestE2eViewer::zoomChangesFontSizeAndResets()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
-    // 縮放改由文件的預設字型控制（不再用 QTextEdit::zoomIn 動 widget 字型），
-    // 因為那樣標題那些明確設定過 pointSize 的片段不會跟著變
+    // Zoom is driven by the document's default font now, not QTextEdit::zoomIn
+    // on the widget font, because that leaves explicitly sized headings behind
     const qreal base = browser()->document()->defaultFont().pointSizeF();
     QVERIFY(base > 0);
 
@@ -796,7 +804,7 @@ void TestE2eViewer::externalEditTriggersReload()
     browser()->verticalScrollBar()->setValue(80);
     const int before = browser()->verticalScrollBar()->value();
 
-    // 外部編輯：新增一個 H2
+    // External edit: append an H2
     QFile f(fixturePath(QStringLiteral("main.md")));
     QVERIFY(f.open(QIODevice::Append));
     f.write(QString::fromUtf8("\n## 新增的第四節\n\n新內容。\n").toUtf8());
@@ -827,12 +835,12 @@ void TestE2eViewer::mermaidPlaceholderIsReplacedByRealImage()
               QStringLiteral("# 圖表\n\n```mermaid\nflowchart LR\n  E2E[端到端] --> OK[通過]\n```\n"));
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("mm.md"))));
 
-    // 一開始是「產生中」的佔位圖：高度為固定的 88
+    // It starts as the "rendering" placeholder, which has a fixed height of 88
     QTRY_VERIFY(!imageSizes().isEmpty());
     QCOMPARE(imageSizes().size(), 1);
     QCOMPARE(imageSizes().first().height(), 88);
 
-    // mmdc 畫完後應被換成真圖，高度不再是 88
+    // Once mmdc finishes it must be swapped for the real image, no longer 88
     QTRY_VERIFY_WITH_TIMEOUT(!imageSizes().isEmpty()
                                  && imageSizes().first().height() != 88, 90000);
 

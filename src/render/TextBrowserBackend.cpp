@@ -24,8 +24,9 @@
 
 namespace {
 
-/// SVG 以 2 倍解析度光柵化，顯示尺寸再由 image format 明確指定，
-/// 這樣在 HiDPI 下不會糊，且尺寸完全可控（不依賴 Qt 對 SVG 固有尺寸的推斷）。
+/// SVG is rasterised at 2x and the display size is then set explicitly on the
+/// image format. That keeps it sharp on HiDPI and makes the size fully
+/// controlled rather than relying on Qt's guess at the SVG's intrinsic size.
 constexpr qreal kRasterScale = 2.0;
 
 QImage placeholderImage(int width, const QString &text, const Theme::Colors &c)
@@ -49,9 +50,11 @@ QImage placeholderImage(int width, const QString &text, const Theme::Colors &c)
     return img;
 }
 
-/// 透明背景的圖片若內容顏色與頁面底色太接近，在該主題下等於看不見。
-/// 這裡量可見像素的平均亮度，對比不足就墊一層中性底色（含 padding）。
-/// mermaid 的圖不走這裡 —— 它的主題由我們指定，本來就與頁面相符。
+/// An image with a transparent background whose content is close in colour to
+/// the page is effectively invisible on that theme. This measures the mean
+/// luminance of the visible pixels and, when contrast is too low, composites the
+/// image onto a neutral card with padding.
+/// Mermaid diagrams skip this: their theme is chosen here and already matches.
 QImage backdropIfLowContrast(const QImage &img, const QColor &pageBg)
 {
     if (img.isNull() || !img.hasAlphaChannel())
@@ -70,10 +73,11 @@ QImage backdropIfLowContrast(const QImage &img, const QColor &pageBg)
         }
     }
     if (n == 0)
-        return img;   // 全透明，沒得救也沒得壞
+        return img;   // Fully transparent; nothing to fix and nothing to break
 
     const double meanLum = sum / n;
-    // 用平均亮度組一個代表灰階來算對比（sRGB 反伽瑪）
+    // Build a representative grey from the mean luminance for the contrast
+    // calculation (undo the sRGB gamma)
     const int v = qBound(0, int(qRound(std::pow(meanLum, 1.0 / 2.2) * 255.0)), 255);
     const QColor representative(v, v, v);
 
@@ -116,8 +120,9 @@ QImage rasterizeSvg(const QString &path, int maxWidth, QSize *logicalOut)
 } // namespace
 
 // ---------------------------------------------------------------------------
-// MdTextBrowser：覆寫資源載入與欄寬置中。
-// 刻意不加 Q_OBJECT —— 只覆寫虛擬函式，不需要自己的 signal/slot。
+// MdTextBrowser: overrides resource loading and centres the content column.
+// Deliberately no Q_OBJECT — it only overrides virtuals and needs no signals
+// or slots of its own.
 // ---------------------------------------------------------------------------
 class MdTextBrowser : public QTextBrowser
 {
@@ -126,12 +131,13 @@ public:
         : QTextBrowser(parent)
         , m_cache(cache)
     {
-        setOpenLinks(false);           // 連結交給 MainWindow 決定怎麼處理
+        setOpenLinks(false);           // MainWindow decides what a link does
         setOpenExternalLinks(false);
         setFrameShape(QFrame::NoFrame);
 
-        // 檢視器不需要復原，而下面那幾個 tree walk 會做上百次格式修改，
-        // 每一次都會被記進 undo stack。關掉省下大量記憶體與時間。
+        // A viewer needs no undo, and the tree walks below make hundreds of
+        // format changes, every one of which would be pushed onto the undo
+        // stack. Turning it off saves a great deal of time and memory.
         document()->setUndoRedoEnabled(false);
     }
 
@@ -144,18 +150,23 @@ public:
 
     void setDark(bool dark) { m_dark = dark; }
 
-    /// 縮放倍率。標題字級是明確設定的（見 applyHeadingScale），
-    /// 不會自動跟著 widget 字型走，所以必須把倍率一起帶進去。
+    /// Zoom factor. Heading sizes are set explicitly (see applyHeadingScale)
+    /// and therefore do not follow the widget font, so the factor has to be
+    /// handed to them as well.
     void setZoomFactor(qreal factor) { m_zoom = factor; }
     qreal zoomFactor() const { return m_zoom; }
     Theme::Mode mode() const { return m_dark ? Theme::Dark : Theme::Light; }
 
-    /// 保證沒有「看不見的文字」。
+    /// Guarantees there is no invisible text.
     ///
-    /// markdown 可以內嵌原始 HTML，裡面可能寫死了顏色（`<span style="color:#000">`），
-    /// 那在黑色主題下就是隱形的。這裡對每個文字片段算它與「實際背景」的 WCAG
-    /// 對比，不足 4.5:1 就換成該背景上讀得到的顏色。
-    /// 實際背景的判定順序：片段自己的背景 → 所屬 block 的背景 → 頁面底色。
+    /// Markdown may embed raw HTML with hard-coded colours
+    /// (`<span style="color:#000">`), which is invisible on the black theme.
+    /// This measures each text fragment's WCAG contrast against its *effective*
+    /// background and, below 4.5:1, replaces the foreground with one that is
+    /// readable there.
+    /// Effective background: the fragment's own, else its block's, else the page.
+    ///
+    /// 中：救的是 markdown 內嵌原始 HTML 寫死顏色的情況。
     void applyContrastFixups()
     {
         const Theme::Mode m = mode();
@@ -212,7 +223,8 @@ public:
             QTextCursor cur(doc);
             cur.setPosition(fx.start);
             cur.setPosition(fx.end, QTextCursor::KeepAnchor);
-            // merge 而非 set：只換前景色，其餘格式（字型、粗體…）保留
+            // merge rather than set: only the foreground changes, so font,
+            // weight and the rest survive
             QTextCharFormat merge;
             merge.setForeground(fx.fg);
             cur.mergeCharFormat(merge);
@@ -220,7 +232,8 @@ public:
         batch.endEditBlock();
     }
 
-    /// 圖片的邏輯（顯示）尺寸，由 loadResource 記錄、供 applyImageSizing 使用。
+    /// Logical (display) size of an image, recorded by loadResource for
+    /// applyImageSizing to use.
     QSize logicalSize(const QString &url) const { return m_logicalSize.value(url); }
 
     int contentWidth() const
@@ -228,8 +241,9 @@ public:
         return qMin(Theme::ContentWidth, qMax(240, viewport()->width() - 32));
     }
 
-    /// Okular 的 converter.cpp 同樣在文件建好後走一遍 tree 修正圖片尺寸。
-    /// 這裡除了套用邏輯尺寸，也處理「圖檔不存在」的退化顯示。
+    /// Okular's markdown converter also walks the document after building it to
+    /// fix image sizes. As well as applying the logical size, this handles the
+    /// degraded display for an image file that does not exist.
     void applyImageSizing()
     {
         struct Fix {
@@ -252,8 +266,9 @@ public:
                 QTextImageFormat fmt = f.charFormat().toImageFormat();
                 const QString url = fmt.name();
 
-                // 若排版還沒跑過（例如 widget 當時是隱藏的），loadResource 就
-                // 沒被呼叫過，這裡主動要一次把尺寸補上。
+                // If layout has not run yet (the widget was hidden when the
+                // document loaded, say), loadResource was never called; ask for
+                // the resource explicitly so the size is known.
                 if (!m_logicalSize.contains(url) && !m_known.contains(url))
                     doc->resource(QTextDocument::ImageResource, QUrl(url));
 
@@ -264,7 +279,8 @@ public:
                     fmt.setHeight(logical.height());
                     fixes.append({ f.position(), f.position() + f.length(), fmt, QString() });
                 } else if (m_known.contains(url) && !m_known.value(url)) {
-                    // 資源載入失敗：用檔名做退化標示（QTextImageFormat 不保留 alt）
+                    // Resource failed to load: fall back to naming the file
+                    // (QTextImageFormat does not keep the alt text)
                     const QUrl u(url);
                     const QString name = u.isLocalFile()
                                              ? QFileInfo(u.toLocalFile()).fileName()
@@ -275,9 +291,10 @@ public:
             }
         }
 
-        // 收集完再改，避免邊走邊改文件。
-        // 整批包進一個 edit block：否則每一次 setCharFormat 都會觸發一次
-        // 重新排版，在有大量片段的文件上是二次方級的成本。
+        // Collect first, then mutate, so the document is not edited while being
+        // walked. Wrap the batch in one edit block: otherwise every
+        // setCharFormat triggers a full re-layout, which is quadratic in the
+        // number of fragments.
         if (fixes.isEmpty())
             return;
         QTextCursor batch(doc);
@@ -290,7 +307,8 @@ public:
             if (fx.missingLabel.isEmpty()) {
                 cur.setCharFormat(fx.fmt);
             } else {
-                // 圖檔不存在：整段換成退化文字，而不是留一個空白圖片框
+                // Missing file: replace the whole fragment with text rather
+                // than leaving an empty image box
                 QTextCharFormat plain;
                 plain.setFontItalic(true);
                 cur.removeSelectedText();
@@ -300,11 +318,12 @@ public:
         batch.endEditBlock();
     }
 
-    /// 明確設定每個標題層級的字級。
+    /// Sets the point size for every heading level explicitly.
     ///
-    /// Qt 的 HTML 解析器對 h5/h6 會套用自己的 fontSizeAdjustment，
-    /// stylesheet 裡的 font-size 蓋不掉 —— 實測 H5 會比正文還小、H6 又比 H5 大。
-    /// 所以字級改在這裡設，Theme::headingPointSize() 是唯一定義處。
+    /// Qt's HTML parser applies its own fontSizeAdjustment to h5/h6, which the
+    /// stylesheet's font-size cannot override — measured, H5 came out smaller
+    /// than body text and H6 larger than H5. Sizes are therefore set here, with
+    /// Theme::headingPointSize() as the single definition.
     void applyHeadingScale()
     {
         const Theme::Colors &c = Theme::colors(mode());
@@ -327,12 +346,17 @@ public:
                 if (!f.isValid() || f.charFormat().isImageFormat())
                     continue;
 
-                // 從既有格式出發，只動需要動的，其餘（字族、行內 code 的底色…）保留
+                // Start from the existing format and change only what must
+                // change, so families and inline-code chips survive
                 QTextCharFormat fmt = f.charFormat();
 
-                // 關鍵：這個屬性只要存在（即使是 0），Qt 就完全忽略 FontPointSize，
-                // 改用「預設字級 × 層級係數」。實測 H1 設 23pt 卻畫成 18pt、
-                // H5 設 11.5pt 卻畫成 7.2pt。必須清掉，設成 0 沒有用。
+                // The crucial part: while this property is present — even set
+                // to 0 — Qt ignores FontPointSize entirely and uses
+                // "default size x level factor" instead. Measured, H1 set to
+                // 23pt drew at 18pt and H5 set to 11.5pt drew at 7.2pt.
+                // It must be cleared; setting it to 0 does nothing.
+                //
+                // 中：這個屬性存在就會蓋掉字級，設 0 沒用，必須 clear。
                 fmt.clearProperty(QTextFormat::FontSizeAdjustment);
                 fmt.setFontPointSize(Theme::headingPointSize(level) * m_zoom);
                 fmt.setFontWeight(QFont::Bold);
@@ -352,17 +376,20 @@ public:
             QTextCursor cur(doc);
             cur.setPosition(fx.start);
             cur.setPosition(fx.end, QTextCursor::KeepAnchor);
-            // setCharFormat 而非 merge：merge 無法「移除」屬性
+            // setCharFormat rather than merge: merge cannot remove a property
             cur.setCharFormat(fx.fmt);
         }
         batch.endEditBlock();
     }
 
-    /// 表格改成「只有橫線」的樣式（對照 Chrome extension 的觀感）。
+    /// Styles tables with horizontal rules only, matching the look of the
+    /// Chrome extension this was compared against.
     ///
-    /// 用 Qt 原生能力而不是自繪：QTextTableFormat::setBorderCollapse(true) 之後
-    /// Qt 會渲染每個 cell 自己的邊框，所以把整體 border 設為 0、只給每列上框線
-    /// 就得到橫線樣式。表頭那一列再加一條較粗的下框線。
+    /// This uses Qt's native cell borders rather than custom painting: with
+    /// QTextTableFormat::setBorderCollapse(true) Qt renders each cell's own
+    /// borders, so setting the overall border to 0 and giving every row a top
+    /// border produces horizontal rules. The header row gets a heavier bottom
+    /// border.
     void applyTableStyling()
     {
         const Theme::Colors &c = Theme::colors(mode());
@@ -379,7 +406,7 @@ public:
 
             QTextTableFormat tf = table->format();
             tf.setBorder(0);
-            tf.setBorderCollapse(true);   // 少了這行 Qt 不會畫 cell 層級的邊框
+            tf.setBorderCollapse(true);   // Without this Qt draws no cell borders at all
             tf.setCellSpacing(0);
             tf.setCellPadding(8);
             tf.setBorderBrush(rule);
@@ -398,7 +425,7 @@ public:
                     cf.setTopBorderStyle(QTextFrameFormat::BorderStyle_Solid);
                     cf.setTopBorderBrush(rule);
 
-                    // 表頭下方那條線畫粗一點，把標題列分出來
+                    // A heavier rule under the header separates it
                     const bool headerBottom = (r == 0 && rows > 1);
                     cf.setBottomBorder(headerBottom ? 2 : (r == rows - 1 ? 1 : 0));
                     cf.setBottomBorderStyle(QTextFrameFormat::BorderStyle_Solid);
@@ -413,7 +440,7 @@ public:
         batch.endEditBlock();
     }
 
-    /// 文件中所有標題的位置，順序與 Document::toc 一致。
+    /// Positions of every heading, in the same order as Document::toc.
     QVector<int> headingPositions() const
     {
         QVector<int> out;
@@ -426,12 +453,14 @@ public:
     }
 
 protected:
-    /// Qt rich-text 不支援 block 層級的 border，所以「標題底下的分隔線」與
-    /// 「引用區塊左側色條」只能自己畫。
+    /// Qt rich text has no block-level border, so the rule under a heading and
+    /// the blockquote bar have to be painted by hand.
     ///
-    /// 引用區塊的辨識靠 blockFormat().leftMargin() == Theme::BlockquoteIndentPx
-    /// —— 那個值由 Theme 的 CSS 設定，是兩邊共用的契約（清單項目有 textList、
-    /// 標題的 leftMargin 是 0，所以不會誤判）。
+    /// Blockquotes are identified by
+    /// blockFormat().leftMargin() == Theme::BlockquoteIndentPx — a value set by
+    /// Theme's stylesheet, making it a contract shared by both sides. List items
+    /// are excluded because they have a textList() and headings because their
+    /// left margin is 0.
     void paintEvent(QPaintEvent *event) override
     {
         QTextBrowser::paintEvent(event);
@@ -451,14 +480,15 @@ protected:
         QPainter p(viewport());
         p.setRenderHint(QPainter::Antialiasing);
 
-        // 從第一個可見的 block 開始，別每次重繪都掃全文件
+        // Start from the first visible block; do not scan the whole document
+        // on every repaint
         const int firstPos = layout->hitTest(QPointF(margin, dy), Qt::FuzzyHit);
         QTextBlock b = firstPos >= 0 ? doc->findBlock(firstPos) : doc->begin();
         if (!b.isValid())
             b = doc->begin();
 
-        // 若第一個可見 block 位於引用區塊中間，要往回走到該段的起點，
-        // 否則色條會從畫面上緣被切掉一截。
+        // If the first visible block sits in the middle of a blockquote, walk
+        // back to the start of it, or the bar is clipped at the top edge.
         while (b.isValid() && isBlockquote(b)) {
             const QTextBlock prev = b.previous();
             if (!prev.isValid() || !isBlockquote(prev))
@@ -475,7 +505,7 @@ protected:
 
             const QTextBlockFormat bf = b.blockFormat();
 
-            // 標題分隔線：只有 H1 / H2，跟一般閱讀習慣一致
+            // Heading rules for H1 and H2 only, as most readers expect
             const int level = bf.headingLevel();
             if ((level == 1 || level == 2) && !b.text().trimmed().isEmpty()) {
                 if (r.bottom() >= clip.top()) {
@@ -487,8 +517,8 @@ protected:
                 continue;
             }
 
-            // 引用區塊左色條：把連續的引用 block 併成一條，
-            // 否則多段引用會畫成好幾截斷掉的短棒。
+            // Blockquote bar: merge consecutive blockquote blocks into one bar,
+            // otherwise a multi-paragraph quote gets several broken stubs.
             if (isBlockquote(b)) {
                 QRectF span = r;
                 QTextBlock last = b;
@@ -513,7 +543,8 @@ protected:
         }
     }
 
-    /// 引用區塊的辨識：leftMargin 等於 Theme 的契約值，且不是清單項目。
+    /// A blockquote is a block whose leftMargin matches Theme's contract value
+    /// and which is not a list item.
     static bool isBlockquote(const QTextBlock &b)
     {
         if (!b.isValid() || b.textList())
@@ -554,7 +585,7 @@ protected:
                                  : QImage(path);
                 if (!img.isNull()) {
                     if (!logical.isValid() || logical.isEmpty()) {
-                        // PNG 是 mmdc 以 N 倍光柵化的，顯示尺寸要除回去
+                        // PNG is rasterised by mmdc at N x, so divide back down
                         const qreal scale = qMax(qreal(1.0), m_cache->outputScale());
                         logical = QSize(qRound(img.width() / scale),
                                         qRound(img.height() / scale));
@@ -565,7 +596,7 @@ protected:
                     m_known.insert(url, true);
                     return img;
                 }
-                // 快取檔壞了 —— 當成未快取處理
+                // The cache file is broken; treat it as not cached
             }
 
             m_cache->request(source, m_dark);
@@ -574,7 +605,7 @@ protected:
             return placeholderImage(contentWidth(), QStringLiteral("圖表產生中…"), c);
         }
 
-        // 普通圖片
+        // An ordinary image
         QImage img;
         if (name.isLocalFile())
             img.load(name.toLocalFile());
@@ -602,7 +633,8 @@ protected:
     {
         QTextBrowser::resizeEvent(e);
 
-        // 欄寬上限 + 置中。Qt rich-text 不支援 max-width，只能靠 viewport margin。
+        // Cap and centre the content column. Qt rich text has no max-width, so
+        // viewport margins are the only lever.
         const int avail = width();
         const int margin = qMax(0, (avail - Theme::ContentWidth) / 2);
         if (margin != m_appliedMargin) {
@@ -615,7 +647,7 @@ private:
     MermaidCache *m_cache = nullptr;
     QHash<QString, QString> m_mermaidSources;
     QHash<QString, QSize> m_logicalSize;
-    QHash<QString, bool> m_known;       ///< url → 載入成功與否
+    QHash<QString, bool> m_known;       ///< url -> whether it loaded
     bool m_dark = false;
     qreal m_zoom = 1.0;
     int m_appliedMargin = -1;
@@ -651,7 +683,7 @@ void TextBrowserBackend::setDocument(const Document &doc)
     m_doc = doc;
     render(false);
 
-    // 所有 mermaid 圖都排入渲染佇列（已快取的會被 request() 直接忽略）
+    // Queue every mermaid diagram; request() ignores the ones already cached
     if (m_cache) {
         for (const MermaidBlock &b : m_doc.mermaid)
             m_cache->request(b.source, m_mode == Theme::Dark);
@@ -680,18 +712,20 @@ void TextBrowserBackend::render(bool preserveScroll)
     m_view->setPalette(Theme::palette(m_mode));
     m_view->document()->setDefaultStyleSheet(Theme::documentStyleSheet(m_mode));
 
-    // 正文字級用 setDefaultFont 明確設定。
-    // stylesheet 裡的 `body { font-size }` 實測**沒有生效** —— 內文一直是
-    // widget 的系統預設字級（這台是 9pt），所以先前文件裡寫的「正文 11pt」
-    // 是錯的。改用 setDefaultFont 才真的控制得到，縮放也才有單一施力點。
+    // Body point size is set explicitly with setDefaultFont.
+    // Measured, the stylesheet's `body { font-size }` has **no effect at all**:
+    // body text stayed at the widget's system default (9pt on this machine),
+    // which made the "11pt body" claim in earlier docs wrong. setDefaultFont is
+    // what actually controls it, and it gives zoom a single place to act.
     QFont baseFont = m_view->document()->defaultFont();
     baseFont.setPointSizeF(Theme::BodyPointSize * m_zoom);
     m_view->document()->setDefaultFont(baseFont);
     m_view->setZoomFactor(m_zoom);
 
-    // Qt 預設的縮排單位是 40px，巢狀清單與引用區塊在中文字體下會縮得很誇張。
-    // Qt rich-text 不吃 CSS 的 margin-left/padding-left 來調清單縮排，
-    // 唯一有效的旋鈕就是文件層級的 indentWidth。
+    // Qt's default indent unit is 40px, which makes nested lists and
+    // blockquotes look wildly over-indented with CJK text. Qt rich text does not
+    // honour CSS margin-left/padding-left for list indentation, so the
+    // document-level indentWidth is the only lever that works.
     m_view->document()->setIndentWidth(20);
 
     if (!m_doc.baseDir.isEmpty())
@@ -726,7 +760,7 @@ void TextBrowserBackend::setScrollValue(int value)
 void TextBrowserBackend::mermaidReady(const QString &key)
 {
     Q_UNUSED(key);
-    // 資源已在快取中，強制讓 QTextDocument 重新向 loadResource 取一次。
+    // The resource is now cached; force QTextDocument to ask loadResource again.
     const int scroll = scrollValue();
     m_view->setMermaidSources(m_doc.mermaid);
     m_view->setHtml(m_doc.html);
@@ -743,8 +777,9 @@ void TextBrowserBackend::setZoom(qreal factor)
     if (qFuzzyCompare(m_zoom, wanted))
         return;
     m_zoom = wanted;
-    // 重新套版而不是用 QTextEdit::zoomIn：後者只動 widget 字型，
-    // 標題那些明確設定過 pointSize 的片段不會跟著變。
+    // Re-render rather than calling QTextEdit::zoomIn: that only changes the
+    // widget font, so fragments with an explicit point size — every heading —
+    // would not follow.
     render(true);
 }
 

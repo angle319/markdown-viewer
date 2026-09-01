@@ -8,8 +8,9 @@
 #include "core/IMermaidRenderer.h"
 #include "core/MermaidCache.h"
 
-/// 假 renderer：不跑 mmdc，只寫一個佔位檔並以非同步方式回報完成。
-/// 順便記錄「同時進行中的渲染數」以驗證佇列真的序列化。
+/// Fake renderer: never runs mmdc, just writes a stub file and reports
+/// completion asynchronously. It also records how many renders are active at
+/// once, which is how the queue's serialisation is verified.
 class FakeRenderer : public IMermaidRenderer
 {
     Q_OBJECT
@@ -84,15 +85,15 @@ void TestMermaidCache::keyDependsOnSourceThemeAndRenderer()
     const QString a = QStringLiteral("graph TD\n A-->B");
     const QString b = QStringLiteral("graph TD\n A-->C");
 
-    QVERIFY(m_cache->keyFor(a, false) != m_cache->keyFor(b, false)); // 內容
-    QVERIFY(m_cache->keyFor(a, false) != m_cache->keyFor(a, true));  // 主題
-    QCOMPARE(m_cache->keyFor(a, false), m_cache->keyFor(a, false));  // 穩定
+    QVERIFY(m_cache->keyFor(a, false) != m_cache->keyFor(b, false)); // content
+    QVERIFY(m_cache->keyFor(a, false) != m_cache->keyFor(a, true));  // theme
+    QCOMPARE(m_cache->keyFor(a, false), m_cache->keyFor(a, false));  // stable
 
-    // renderer 換掉 → key 換掉
+    // A different renderer means a different key
     FakeRenderer other;
     MermaidCache c2(&other);
     c2.setCacheDir(m_cache->cacheDir());
-    QCOMPARE(c2.keyFor(a, false), m_cache->keyFor(a, false)); // 同 rendererId 故相同
+    QCOMPARE(c2.keyFor(a, false), m_cache->keyFor(a, false)); // same rendererId, so the same key
 }
 
 void TestMermaidCache::pathUsesRendererExtension()
@@ -130,7 +131,7 @@ void TestMermaidCache::queueSerializesRenders()
     QVERIFY(idleSpy.wait(5000));
 
     QCOMPARE(m_fake->startCount, 3);
-    QCOMPARE(m_fake->maxActive, 1);   // 關鍵：絕不同時跑兩個 mmdc
+    QCOMPARE(m_fake->maxActive, 1);   // The point: never two mmdc runs at once
     QCOMPARE(m_cache->pendingCount(), 0);
 }
 
@@ -159,7 +160,7 @@ void TestMermaidCache::unavailableRendererDegradesSilently()
     QCOMPARE(m_cache->pendingCount(), 0);
     QCOMPARE(m_fake->startCount, 0);
     QCOMPARE(renderedSpy.count(), 0);
-    QCOMPARE(failedSpy.count(), 0);   // 不是錯誤，是 degrade
+    QCOMPARE(failedSpy.count(), 0);   // Not an error; this is the degrade path
 }
 
 void TestMermaidCache::failureRemovesPartialFile()
@@ -171,7 +172,8 @@ void TestMermaidCache::failureRemovesPartialFile()
     m_cache->request(src, false);
     QVERIFY(failedSpy.wait(5000));
 
-    // 半截檔案不能留在快取裡，否則下次會被誤判為命中
+    // A partial file must not stay in the cache; the next request would
+    // mistake it for a hit
     QVERIFY(!m_cache->isCached(src, false));
     QVERIFY(!QFile::exists(m_cache->pathFor(src, false)));
 }
