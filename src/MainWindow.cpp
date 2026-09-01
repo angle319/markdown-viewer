@@ -258,10 +258,10 @@ void MainWindow::buildMenus()
         Qt::Key key;
     };
     static const CompareItem items[] = {
-        { "單欄（關閉比較）", 1, Qt::Key_1 },
-        { "比較 2 欄", 2, Qt::Key_2 },
-        { "比較 3 欄", 3, Qt::Key_3 },
-        { "比較 4 欄", 4, Qt::Key_4 },
+        { "單一面板（不分割）", 1, Qt::Key_1 },
+        { "分割 2 格", 2, Qt::Key_2 },
+        { "分割 3 格", 3, Qt::Key_3 },
+        { "分割 4 格", 4, Qt::Key_4 },
     };
     for (const CompareItem &item : items) {
         auto *act = viewMenu->addAction(QString::fromUtf8(item.text));
@@ -274,6 +274,22 @@ void MainWindow::buildMenus()
                 [this, cols = item.columns] { setCompareColumns(cols); });
         addAction(act);
     }
+
+    auto *actMoveRight = viewMenu->addAction(QStringLiteral("分頁移到右邊面板"));
+    actMoveRight->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Right));
+    connect(actMoveRight, &QAction::triggered, this, [this] {
+        m_area->moveActiveTabToPane(1);
+        setCompareColumns(m_area->paneCount());
+    });
+    addAction(actMoveRight);
+
+    auto *actMoveLeft = viewMenu->addAction(QStringLiteral("分頁移到左邊面板"));
+    actMoveLeft->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Left));
+    connect(actMoveLeft, &QAction::triggered, this, [this] {
+        m_area->moveActiveTabToPane(-1);
+        setCompareColumns(m_area->paneCount());
+    });
+    addAction(actMoveLeft);
 
     viewMenu->addSeparator();
     auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
@@ -380,9 +396,9 @@ void MainWindow::setMode(Theme::Mode mode)
 
 void MainWindow::setCompareColumns(int columns)
 {
-    m_area->setCompareColumns(columns);
+    m_area->setPaneCount(columns);
     for (QAction *a : m_compareGroup->actions())
-        if (a->data().toInt() == m_area->compareColumns())
+        if (a->data().toInt() == m_area->paneCount())
             a->setChecked(true);
     updateStatus();
 }
@@ -487,8 +503,8 @@ void MainWindow::updateStatus(const QString &transient)
 
     if (m_area->count() > 1)
         parts << QStringLiteral("%1/%2 分頁").arg(m_area->activeIndex() + 1).arg(m_area->count());
-    if (m_area->compareColumns() > 1)
-        parts << QStringLiteral("比較 %1 欄").arg(m_area->compareColumns());
+    if (m_area->paneCount() > 1)
+        parts << QStringLiteral("%1 格").arg(m_area->paneCount());
 
     if (view) {
         parts << QFileInfo(view->path()).fileName();
@@ -535,7 +551,7 @@ void MainWindow::loadSettings()
     if (!lastRoot.isEmpty() && QFileInfo(lastRoot).isDir())
         m_sidebar->files()->setRoot(lastRoot);
 
-    setCompareColumns(s.value(QStringLiteral("view/compareColumns"), 1).toInt());
+    setCompareColumns(s.value(QStringLiteral("view/panes"), 1).toInt());
 }
 
 void MainWindow::saveSettings()
@@ -546,7 +562,7 @@ void MainWindow::saveSettings()
     s.setValue(QStringLiteral("view/dark"), m_mode == Theme::Dark);
     s.setValue(QStringLiteral("view/sidebar"), m_sidebar->isVisible());
     s.setValue(QStringLiteral("view/sidebarTab"), m_sidebar->currentIndex());
-    s.setValue(QStringLiteral("view/compareColumns"), m_area->compareColumns());
+    s.setValue(QStringLiteral("view/panes"), m_area->paneCount());
 
     QVariantList sizes;
     for (int v : m_splitter->sizes())

@@ -46,6 +46,7 @@ if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
     add_library(mdgui STATIC
         src/MainWindow.cpp
         src/DocumentArea.cpp
+        src/PaneGroup.cpp
         src/DocumentView.cpp
         src/Sidebar.cpp
         src/TocPanel.cpp

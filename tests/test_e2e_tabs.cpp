@@ -12,6 +12,7 @@
 #include <QTreeWidget>
 
 #include "DocumentArea.h"
+#include "PaneGroup.h"
 #include "DocumentView.h"
 #include "MainWindow.h"
 #include "PathBar.h"
@@ -38,11 +39,16 @@ private slots:
     void eachTabWatchesItsOwnFile();
     void linkNavigationStaysInSameTab();
 
-    // --- 比較模式 ---
-    void compareModeShowsRequestedColumns();
-    void compareModeClampsToTabCount();
-    void compareWindowSlidesLeftWhenNearTheEnd();
-    void leavingCompareModeShowsOnlyActiveTab();
+    // --- 分割面板（VS Code 式的 editor group）---
+    void splittingGivesEachPaneItsOwnTabBar();
+    void paneCountNeverExceedsDocumentCount();
+    void mergingPanesBringsDocumentsBack();
+    void movingTabToAdjacentPaneCreatesOne();
+    void dropZoneIsComputedFromPosition();
+    void droppingTabOnEdgeSplits();
+    void droppingTabIntoAnotherPaneMovesIt();
+    void emptyPaneIsRemovedAutomatically();
+    void activePaneIsMarkedOnlyWhenSplit();
 
     // --- 全域操作套用到所有分頁 ---
     void themeAppliesToEveryTab();
@@ -274,66 +280,174 @@ void TestE2eTabs::linkNavigationStaysInSameTab()
 
 // -------------------------------------------------------------- 比較模式
 
-void TestE2eTabs::compareModeShowsRequestedColumns()
+void TestE2eTabs::splittingGivesEachPaneItsOwnTabBar()
 {
     for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
                               QStringLiteral("c.md") })
         QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
     QCOMPARE(area()->count(), 3);
-    QCOMPARE(visibleCount(), 1);           // 預設單欄
+    QCOMPARE(area()->paneCount(), 1);
 
-    area()->setActiveIndex(0);
-    area()->setCompareColumns(2);
-    QCOMPARE(area()->compareColumns(), 2);
-    QCOMPARE(visibleCount(), 2);
-    QCOMPARE(area()->visibleViews().at(0), area()->viewAt(0));
-    QCOMPARE(area()->visibleViews().at(1), area()->viewAt(1));
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneCount(), 2);
 
-    area()->setCompareColumns(3);
-    QCOMPARE(visibleCount(), 3);
+    // 關鍵：每一格都有自己的分頁列，而且列出的正是屬於它的文件。
+    // 先前的單一全域分頁列做不到這件事 —— 看不出哪個分頁對應哪一格。
+    int totalTabs = 0;
+    for (int i = 0; i < area()->paneCount(); ++i) {
+        PaneGroup *pane = area()->paneAt(i);
+        QVERIFY(pane);
+        QVERIFY2(pane->tabBar() != nullptr, "面板沒有自己的分頁列");
+        QVERIFY2(pane->count() > 0, "面板是空的");
+        QCOMPARE(pane->tabBar()->count(), pane->count());
+        for (int t = 0; t < pane->count(); ++t)
+            QCOMPARE(pane->tabBar()->tabText(t), pane->viewAt(t)->title());
+        totalTabs += pane->count();
+    }
+    QCOMPARE(totalTabs, 3);              // 文件沒有遺失，只是換了格子
+    QCOMPARE(area()->visibleViews().size(), 2);
 }
 
-void TestE2eTabs::compareModeClampsToTabCount()
+void TestE2eTabs::paneCountNeverExceedsDocumentCount()
 {
     QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
     QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
 
-    area()->setCompareColumns(4);          // 只有 2 個分頁
-    QCOMPARE(visibleCount(), 2);           // 顯示全部，不會空欄
+    area()->setPaneCount(4);             // 只有 2 份文件
+    QCOMPARE(area()->paneCount(), 2);    // 不做出空面板
 
-    // 上限也要守住
-    area()->setCompareColumns(99);
-    QVERIFY(area()->compareColumns() <= DocumentArea::MaxCompareColumns);
+    area()->setPaneCount(99);
+    QVERIFY(area()->paneCount() <= DocumentArea::MaxPanes);
 }
 
-void TestE2eTabs::compareWindowSlidesLeftWhenNearTheEnd()
-{
-    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
-                              QStringLiteral("c.md"), QStringLiteral("d.md") })
-        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
-    QCOMPARE(area()->count(), 4);
-
-    area()->setCompareColumns(2);
-    area()->setActiveIndex(3);             // 最後一個分頁，右邊沒東西了
-
-    // 視窗往左滑，仍然顯示滿 2 欄（第 3、4 個）
-    QCOMPARE(visibleCount(), 2);
-    QCOMPARE(area()->visibleViews().at(0), area()->viewAt(2));
-    QCOMPARE(area()->visibleViews().at(1), area()->viewAt(3));
-}
-
-void TestE2eTabs::leavingCompareModeShowsOnlyActiveTab()
+void TestE2eTabs::mergingPanesBringsDocumentsBack()
 {
     QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
     QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneCount(), 2);
 
-    area()->setCompareColumns(2);
-    QCOMPARE(visibleCount(), 2);
+    area()->setPaneCount(1);
+    QCOMPARE(area()->paneCount(), 1);
+    QCOMPARE(area()->count(), 2);        // 兩份文件都還在，併回同一格
+    QCOMPARE(area()->paneAt(0)->count(), 2);
+}
 
+void TestE2eTabs::movingTabToAdjacentPaneCreatesOne()
+{
+    QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
+    QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+    QCOMPARE(area()->paneCount(), 1);
+
+    area()->moveActiveTabToPane(1);      // 沒有右邊的面板 → 新建一個
+    QCOMPARE(area()->paneCount(), 2);
+    QCOMPARE(area()->paneAt(0)->count(), 1);
+    QCOMPARE(area()->paneAt(1)->count(), 1);
+    QCOMPARE(area()->paneAt(1)->currentView()->title(), QStringLiteral("乙"));
+    QCOMPARE(area()->activeGroup(), area()->paneAt(1));
+}
+
+void TestE2eTabs::dropZoneIsComputedFromPosition()
+{
+    const QRect pane(0, 0, 400, 300);
+    QCOMPARE(PaneGroup::zoneFor(pane, QPoint(10, 150)), PaneGroup::DropZone::SplitLeft);
+    QCOMPARE(PaneGroup::zoneFor(pane, QPoint(390, 150)), PaneGroup::DropZone::SplitRight);
+    QCOMPARE(PaneGroup::zoneFor(pane, QPoint(200, 150)), PaneGroup::DropZone::Into);
+
+    // 很窄的面板也要留得住可用的邊緣區
+    const QRect narrow(0, 0, 100, 300);
+    QCOMPARE(PaneGroup::zoneFor(narrow, QPoint(5, 10)), PaneGroup::DropZone::SplitLeft);
+    QCOMPARE(PaneGroup::zoneFor(narrow, QPoint(95, 10)), PaneGroup::DropZone::SplitRight);
+}
+
+void TestE2eTabs::droppingTabOnEdgeSplits()
+{
+    QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
+    QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+    PaneGroup *pane = area()->paneAt(0);
+    QCOMPARE(area()->paneCount(), 1);
+
+    // 把「甲」拖到同一格的右緣 → 在右邊開一格
+    // （真正的 QDrag 序列在測試裡跑不起來，所以驗的是 dropEvent 轉接的那個方法）
+    area()->moveTabToPane(pane, pane->indexOfPath(area()->viewAt(0)->path()), pane,
+                          PaneGroup::DropZone::SplitRight);
+
+    QCOMPARE(area()->paneCount(), 2);
+    QCOMPARE(area()->paneAt(0)->count(), 1);
+    QCOMPARE(area()->paneAt(1)->count(), 1);
+    QCOMPARE(area()->paneAt(1)->currentView()->title(), QStringLiteral("甲"));
+
+    // 拖到左緣則插在左邊
+    PaneGroup *right = area()->paneAt(1);
+    area()->moveTabToPane(right, 0, area()->paneAt(0), PaneGroup::DropZone::SplitLeft);
+    QCOMPARE(area()->paneCount(), 2);
+    QCOMPARE(area()->paneAt(0)->currentView()->title(), QStringLiteral("甲"));
+}
+
+void TestE2eTabs::droppingTabIntoAnotherPaneMovesIt()
+{
+    QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
+    QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneAt(0)->count(), 1);
+    QCOMPARE(area()->paneAt(1)->count(), 1);
+
+    // 把右格的分頁拖進左格中央 → 併入，右格空掉後自動收掉
+    area()->moveTabToPane(area()->paneAt(1), 0, area()->paneAt(0),
+                          PaneGroup::DropZone::Into);
+
+    QCOMPARE(area()->paneCount(), 1);
+    QCOMPARE(area()->paneAt(0)->count(), 2);
+    QCOMPARE(area()->count(), 2);
+}
+
+void TestE2eTabs::emptyPaneIsRemovedAutomatically()
+{
+    QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
+    QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneCount(), 2);
+
+    // 關掉右格唯一的分頁
     area()->setActiveIndex(1);
-    area()->setCompareColumns(1);
-    QCOMPARE(visibleCount(), 1);
-    QCOMPARE(area()->visibleViews().at(0), area()->viewAt(1));
+    area()->closeActiveTab();
+
+    QCOMPARE(area()->paneCount(), 1);     // 空面板自動收掉
+    QCOMPARE(area()->count(), 1);
+    QVERIFY(area()->activeView() != nullptr);
+}
+
+void TestE2eTabs::activePaneIsMarkedOnlyWhenSplit()
+{
+    QVERIFY(m_win->openFile(make(QStringLiteral("a.md"), QStringLiteral("甲"))));
+    QVERIFY(m_win->openFile(make(QStringLiteral("b.md"), QStringLiteral("乙"))));
+
+    // 只有一格時不需要標示「哪一格是作用中的」
+    QCOMPARE(area()->paneCount(), 1);
+    QVERIFY(!area()->paneAt(0)->isActiveIndicatorVisible());
+
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneCount(), 2);
+
+    // 分割後，而且只有作用中那一格有標示
+    int marked = 0;
+    for (int i = 0; i < area()->paneCount(); ++i) {
+        PaneGroup *p = area()->paneAt(i);
+        QCOMPARE(p->isActiveIndicatorVisible(), p == area()->activeGroup());
+        if (p->isActiveIndicatorVisible())
+            ++marked;
+    }
+    QCOMPARE(marked, 1);
+
+    // 切到另一格，標示要跟著移動
+    PaneGroup *other = area()->paneAt(0) == area()->activeGroup() ? area()->paneAt(1)
+                                                                  : area()->paneAt(0);
+    area()->setActiveIndex(area()->paneAt(0) == other ? 0 : area()->count() - 1);
+    QVERIFY(other->isActiveIndicatorVisible());
+
+    // 併回一格後標示消失
+    area()->setPaneCount(1);
+    QVERIFY(!area()->paneAt(0)->isActiveIndicatorVisible());
 }
 
 // ------------------------------------------------ 全域操作套用到所有分頁
@@ -415,7 +529,7 @@ void TestE2eTabs::dumpScreenshotsIfRequested()
         (dark ? black : white)->trigger();
         for (const int cols : { 1, 2, 3 }) {
             area()->setActiveIndex(0);
-            area()->setCompareColumns(cols);
+            area()->setPaneCount(cols);
             QTest::qWait(200);
             const QString path = QStringLiteral("%1/%2-%3-%4col.png")
                                      .arg(dir)
@@ -427,7 +541,7 @@ void TestE2eTabs::dumpScreenshotsIfRequested()
         }
     }
     white->trigger();
-    area()->setCompareColumns(1);
+    area()->setPaneCount(1);
 }
 
 QTEST_MAIN(TestE2eTabs)

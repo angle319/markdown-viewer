@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PaneGroup.h"
 #include "Theme.h"
 
 #include <QWidget>
@@ -8,50 +9,58 @@ class DocumentView;
 class MermaidCache;
 class QLabel;
 class QSplitter;
-class QTabBar;
 
-/// 分頁 + 比較模式的容器。
+/// 分割面板的容器 —— VS Code 的 editor group 模型。
 ///
-/// 構造刻意簡單：**所有 DocumentView 都常駐在同一個 QSplitter 裡**，
-/// 靠 setVisible() 決定畫面上出現哪幾個。這樣切換分頁與進出比較模式都不需要
-/// 把 widget 在容器之間搬來搬去（reparent 會丟掉捲動位置與焦點）。
+/// 每個 PaneGroup 有自己的分頁列，一份文件屬於其中一格。這樣「哪個分頁對應
+/// 哪一格」在畫面上是自明的；先前用單一全域分頁列的版本做不到這件事。
 ///
-/// 分頁順序的唯一真實來源是 QTabBar：每個 tab 的 tabData 存著對應的
-/// DocumentView 指標，所以使用者拖曳排序後不需要另外同步任何清單。
-///
-/// 比較模式顯示「從目前分頁起算連續 N 個」；右邊不夠時視窗往左滑，
-/// 所以只要分頁數 >= N 就一定顯示滿 N 欄。
+/// 分割的產生方式有兩種：選單選欄數，或把分頁拖到某一格的左右邊緣。
+/// 拖到中間則是移入該格。空掉的面板會自動收掉（至少保留一格）。
 class DocumentArea : public QWidget
 {
     Q_OBJECT
 
 public:
-    static constexpr int MaxCompareColumns = 4;
+    static constexpr int MaxPanes = 4;
 
     explicit DocumentArea(MermaidCache *cache, QWidget *parent = nullptr);
 
-    /// 開檔。已經開過就切到那個分頁，不會重複開。失敗回傳 nullptr。
+    /// 開檔。已經開過就切到那個分頁（可能在別的面板），不會重複開。
     DocumentView *openFile(const QString &path);
 
+    // ---- 以「全域索引」看待所有文件：面板順序 × 面板內分頁順序 ----
     int count() const;
     DocumentView *viewAt(int index) const;
-    DocumentView *activeView() const;
+    QStringList openPaths() const;
     int activeIndex() const;
     void setActiveIndex(int index);
 
-    /// 目前開啟的檔案路徑，順序與分頁一致。
-    QStringList openPaths() const;
+    DocumentView *activeView() const;
+    PaneGroup *activeGroup() const { return m_activeGroup; }
 
     void closeTab(int index);
     void closeActiveTab();
     void nextTab();
     void previousTab();
 
-    /// 1 = 一般模式；2..4 = 比較模式的欄數。
-    void setCompareColumns(int columns);
-    int compareColumns() const { return m_compareColumns; }
+    // ---- 面板 ----
+    int paneCount() const;
+    PaneGroup *paneAt(int index) const;
+    /// 面板數量。1 = 沒有分割。
+    void setPaneCount(int panes);
+    /// 把作用中的分頁搬到相鄰面板；沒有相鄰面板時新建一個。
+    void moveActiveTabToPane(int delta);
 
-    /// 目前實際顯示在畫面上的 view（一般模式為 1 個）。
+    /// 把某一格的某個分頁搬到另一格。zone 為 Into 是併入，
+    /// SplitLeft/SplitRight 則在目標格的該側新開一格。
+    ///
+    /// 公開是為了可測：合成跨 widget 的 QDrag 序列在測試裡跑不起來
+    /// （同 MainWindow::openFromUrls 的理由）。dropEvent 只是這個方法的轉接。
+    void moveTabToPane(PaneGroup *source, int index, PaneGroup *target,
+                       PaneGroup::DropZone zone);
+
+    /// 目前每一格顯示的文件，依面板順序。
     QList<DocumentView *> visibleViews() const;
 
     void setTheme(Theme::Mode mode);
@@ -60,28 +69,34 @@ public:
     void resetZoom();
 
 Q_SIGNALS:
-    /// 作用中的分頁換了（或它的文件換了）
     void activeViewChanged();
-    /// 作用中文件的內容／TOC 變了
     void activeDocumentChanged();
     void currentTocIndexChanged(int index);
     void linkActivated(const QUrl &url);
     void statusMessage(const QString &text);
-    /// 分頁數量或順序變了（供設定持久化）
     void tabsChanged();
 
 private:
     DocumentView *createView();
-    void wire(DocumentView *view);
-    void updateVisibility();
-    void updateTabText(DocumentView *view);
-    int indexOf(DocumentView *view) const;
-    int indexOfPath(const QString &path) const;
+    void wireView(DocumentView *view);
+    PaneGroup *createPane(int at = -1);
+    void wirePane(PaneGroup *pane);
+    void setActivePane(PaneGroup *pane);
+    void pruneEmptyPanes();
+    void refreshPaneIndicators();
+    void updatePlaceholder();
+    PaneGroup *paneOf(DocumentView *view) const;
+    void onTabDropped(PaneGroup *target, PaneGroup::DropZone zone);
 
     MermaidCache *m_cache = nullptr;   ///< 不擁有
-    QTabBar *m_tabBar = nullptr;
     QSplitter *m_splitter = nullptr;
     QLabel *m_placeholder = nullptr;
+    PaneGroup *m_activeGroup = nullptr;
     Theme::Mode m_mode = Theme::Light;
-    int m_compareColumns = 1;
+
+    /// 跨面板拖曳的來源，在 tabDragOut 時記下（同一時間只會有一個拖曳）
+    struct DragSource {
+        PaneGroup *pane = nullptr;
+        int index = -1;
+    } m_dragSource;
 };

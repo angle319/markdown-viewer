@@ -11,17 +11,9 @@
 DocumentArea::DocumentArea(MermaidCache *cache, QWidget *parent)
     : QWidget(parent)
     , m_cache(cache)
-    , m_tabBar(new QTabBar(this))
     , m_splitter(new QSplitter(Qt::Horizontal, this))
     , m_placeholder(new QLabel(this))
 {
-    m_tabBar->setTabsClosable(true);
-    m_tabBar->setMovable(true);           // 拖曳排序即可換比較對象
-    m_tabBar->setExpanding(false);
-    m_tabBar->setElideMode(Qt::ElideMiddle);
-    m_tabBar->setUsesScrollButtons(true);
-    m_tabBar->setDrawBase(false);
-
     m_splitter->setChildrenCollapsible(false);
 
     m_placeholder->setAlignment(Qt::AlignCenter);
@@ -32,92 +24,359 @@ DocumentArea::DocumentArea(MermaidCache *cache, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    layout->addWidget(m_tabBar);
     layout->addWidget(m_placeholder, 1);
     layout->addWidget(m_splitter, 1);
 
-    connect(m_tabBar, &QTabBar::currentChanged, this, [this](int) {
-        updateVisibility();
+    createPane();
+    updatePlaceholder();
+}
+
+// ------------------------------------------------------------------- 面板
+
+int DocumentArea::paneCount() const
+{
+    return m_splitter->count();
+}
+
+PaneGroup *DocumentArea::paneAt(int index) const
+{
+    return qobject_cast<PaneGroup *>(m_splitter->widget(index));
+}
+
+PaneGroup *DocumentArea::createPane(int at)
+{
+    auto *pane = new PaneGroup(m_splitter);
+    if (at < 0 || at >= m_splitter->count())
+        m_splitter->addWidget(pane);
+    else
+        m_splitter->insertWidget(at, pane);
+    wirePane(pane);
+    if (!m_activeGroup)
+        setActivePane(pane);
+    return pane;
+}
+
+void DocumentArea::wirePane(PaneGroup *pane)
+{
+    connect(pane, &PaneGroup::activated, this, [this, pane] { setActivePane(pane); });
+    connect(pane, &PaneGroup::currentChanged, this, [this, pane] {
+        if (pane == m_activeGroup)
+            Q_EMIT activeViewChanged();
+    });
+    connect(pane, &PaneGroup::tabsChanged, this, &DocumentArea::tabsChanged);
+    connect(pane, &PaneGroup::closeRequested, this, [this, pane](int index) {
+        setActivePane(pane);
+        pane->removeView(index);
+        pruneEmptyPanes();
+        updatePlaceholder();
+        Q_EMIT tabsChanged();
         Q_EMIT activeViewChanged();
     });
-    connect(m_tabBar, &QTabBar::tabCloseRequested, this, &DocumentArea::closeTab);
-    connect(m_tabBar, &QTabBar::tabMoved, this, [this](int, int) {
-        // tabData 跟著 tab 一起移動，所以順序自動就是對的
-        updateVisibility();
-        Q_EMIT tabsChanged();
+    connect(pane, &PaneGroup::tabDragOut, this, [this, pane](int index) {
+        m_dragSource = { pane, index };
     });
-
-    updateVisibility();
+    connect(pane, &PaneGroup::tabDropped, this, &DocumentArea::onTabDropped);
 }
+
+void DocumentArea::setActivePane(PaneGroup *pane)
+{
+    if (!pane || m_activeGroup == pane)
+        return;
+    m_activeGroup = pane;
+    refreshPaneIndicators();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::pruneEmptyPanes()
+{
+    for (int i = m_splitter->count() - 1; i >= 0 && m_splitter->count() > 1; --i) {
+        PaneGroup *pane = paneAt(i);
+        if (!pane || pane->count() > 0)
+            continue;
+        if (pane == m_activeGroup)
+            m_activeGroup = nullptr;
+        pane->setParent(nullptr);
+        pane->deleteLater();
+    }
+    if (!m_activeGroup)
+        setActivePane(paneAt(0));
+
+    refreshPaneIndicators();
+}
+
+void DocumentArea::refreshPaneIndicators()
+{
+    const bool multi = paneCount() > 1;
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i))
+            p->setActive(p == m_activeGroup, multi);
+}
+
+void DocumentArea::updatePlaceholder()
+{
+    const bool empty = count() == 0;
+    m_placeholder->setVisible(empty);
+    m_splitter->setVisible(!empty);
+}
+
+PaneGroup *DocumentArea::paneOf(DocumentView *view) const
+{
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i); p && p->indexOf(view) >= 0)
+            return p;
+    return nullptr;
+}
+
+void DocumentArea::setPaneCount(int panes)
+{
+    // 不做出空面板：面板數不會超過文件數
+    const int wanted = qBound(1, qMin(panes, MaxPanes), qMax(1, count()));
+
+    while (paneCount() < wanted) {
+        // 從分頁最多的那一格勻一份出來，優先勻走「目前分頁的下一個」
+        PaneGroup *donor = nullptr;
+        for (int i = 0; i < m_splitter->count(); ++i)
+            if (PaneGroup *p = paneAt(i); p && (!donor || p->count() > donor->count()))
+                donor = p;
+        if (!donor || donor->count() < 2)
+            break;
+
+        const int take = qMin(donor->currentIndex() + 1, donor->count() - 1);
+        DocumentView *view = donor->takeView(take);
+        PaneGroup *pane = createPane();
+        view->setParent(nullptr);
+        pane->setCurrentIndex(pane->addView(view));
+    }
+
+    while (paneCount() > wanted) {
+        PaneGroup *last = paneAt(m_splitter->count() - 1);
+        PaneGroup *prev = paneAt(m_splitter->count() - 2);
+        if (!last || !prev)
+            break;
+        while (last->count() > 0) {
+            DocumentView *view = last->takeView(0);
+            view->setParent(nullptr);
+            prev->addView(view);
+        }
+        if (last == m_activeGroup)
+            m_activeGroup = nullptr;
+        last->setParent(nullptr);
+        last->deleteLater();
+    }
+
+    if (!m_activeGroup)
+        setActivePane(paneAt(0));
+    pruneEmptyPanes();
+    refreshPaneIndicators();
+    updatePlaceholder();
+    Q_EMIT statusMessage(paneCount() == 1 ? QStringLiteral("單一面板")
+                                          : QStringLiteral("已分割成 %1 格").arg(paneCount()));
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::moveActiveTabToPane(int delta)
+{
+    PaneGroup *src = m_activeGroup;
+    if (!src || src->count() == 0)
+        return;
+
+    const int here = m_splitter->indexOf(src);
+    const int target = here + delta;
+
+    DocumentView *view = src->takeView(src->currentIndex());
+    if (!view)
+        return;
+
+    PaneGroup *dest = nullptr;
+    if (target >= 0 && target < m_splitter->count())
+        dest = paneAt(target);
+    else if (paneCount() < MaxPanes)
+        dest = createPane(delta > 0 ? -1 : 0);
+    else
+        dest = src;   // 已達上限，放回原處
+
+    view->setParent(nullptr);
+    dest->setCurrentIndex(dest->addView(view));
+    setActivePane(dest);
+    pruneEmptyPanes();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::onTabDropped(PaneGroup *target, PaneGroup::DropZone zone)
+{
+    PaneGroup *src = m_dragSource.pane;
+    const int index = m_dragSource.index;
+    m_dragSource = {};
+    moveTabToPane(src, index, target, zone);
+}
+
+void DocumentArea::moveTabToPane(PaneGroup *src, int index, PaneGroup *target,
+                                 PaneGroup::DropZone zone)
+{
+    if (!src || !target || index < 0)
+        return;
+
+    // 放回自己身上的中間 = 什麼都不做
+    if (zone == PaneGroup::DropZone::Into && src == target)
+        return;
+    // 這一格只有一個分頁，又要在它旁邊分割 = 等於沒變
+    if (zone != PaneGroup::DropZone::Into && src == target && src->count() < 2)
+        return;
+
+    DocumentView *view = src->takeView(index);
+    if (!view)
+        return;
+
+    PaneGroup *dest = target;
+    if (zone != PaneGroup::DropZone::Into) {
+        if (paneCount() >= MaxPanes) {
+            dest = target;   // 已達面板上限，就併進目標格
+        } else {
+            const int at = m_splitter->indexOf(target)
+                           + (zone == PaneGroup::DropZone::SplitRight ? 1 : 0);
+            dest = createPane(at);
+        }
+    }
+
+    view->setParent(nullptr);
+    dest->setCurrentIndex(dest->addView(view));
+    setActivePane(dest);
+    pruneEmptyPanes();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+// --------------------------------------------------------------- 全域索引
 
 int DocumentArea::count() const
 {
-    return m_tabBar->count();
+    int n = 0;
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i))
+            n += p->count();
+    return n;
 }
 
 DocumentView *DocumentArea::viewAt(int index) const
 {
-    if (index < 0 || index >= m_tabBar->count())
-        return nullptr;
-    return m_tabBar->tabData(index).value<DocumentView *>();
-}
-
-DocumentView *DocumentArea::activeView() const
-{
-    return viewAt(m_tabBar->currentIndex());
-}
-
-int DocumentArea::activeIndex() const
-{
-    return m_tabBar->currentIndex();
-}
-
-void DocumentArea::setActiveIndex(int index)
-{
-    if (index >= 0 && index < m_tabBar->count())
-        m_tabBar->setCurrentIndex(index);
+    int seen = 0;
+    for (int i = 0; i < m_splitter->count(); ++i) {
+        PaneGroup *p = paneAt(i);
+        if (!p)
+            continue;
+        if (index < seen + p->count())
+            return p->viewAt(index - seen);
+        seen += p->count();
+    }
+    return nullptr;
 }
 
 QStringList DocumentArea::openPaths() const
 {
     QStringList out;
-    for (int i = 0; i < m_tabBar->count(); ++i)
-        if (DocumentView *v = viewAt(i))
-            out << v->path();
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i))
+            out << p->paths();
     return out;
 }
 
-int DocumentArea::indexOf(DocumentView *view) const
+int DocumentArea::activeIndex() const
 {
-    for (int i = 0; i < m_tabBar->count(); ++i)
+    DocumentView *view = activeView();
+    if (!view)
+        return -1;
+    for (int i = 0; i < count(); ++i)
         if (viewAt(i) == view)
             return i;
     return -1;
 }
 
-int DocumentArea::indexOfPath(const QString &path) const
+void DocumentArea::setActiveIndex(int index)
 {
-    const QString abs = QFileInfo(path).absoluteFilePath();
-    for (int i = 0; i < m_tabBar->count(); ++i)
-        if (DocumentView *v = viewAt(i); v && v->path() == abs)
-            return i;
-    return -1;
+    DocumentView *view = viewAt(index);
+    if (!view)
+        return;
+    PaneGroup *pane = paneOf(view);
+    if (!pane)
+        return;
+    setActivePane(pane);
+    pane->setCurrentIndex(pane->indexOf(view));
+    Q_EMIT activeViewChanged();
 }
+
+DocumentView *DocumentArea::activeView() const
+{
+    return m_activeGroup ? m_activeGroup->currentView() : nullptr;
+}
+
+void DocumentArea::closeTab(int index)
+{
+    DocumentView *view = viewAt(index);
+    if (!view)
+        return;
+    PaneGroup *pane = paneOf(view);
+    if (!pane)
+        return;
+    pane->removeView(pane->indexOf(view));
+    pruneEmptyPanes();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::closeActiveTab()
+{
+    if (m_activeGroup && m_activeGroup->count() > 0) {
+        m_activeGroup->removeView(m_activeGroup->currentIndex());
+        pruneEmptyPanes();
+        updatePlaceholder();
+        Q_EMIT tabsChanged();
+        Q_EMIT activeViewChanged();
+    }
+}
+
+void DocumentArea::nextTab()
+{
+    const int n = count();
+    if (n > 1)
+        setActiveIndex((activeIndex() + 1) % n);
+}
+
+void DocumentArea::previousTab()
+{
+    const int n = count();
+    if (n > 1)
+        setActiveIndex((activeIndex() - 1 + n) % n);
+}
+
+QList<DocumentView *> DocumentArea::visibleViews() const
+{
+    QList<DocumentView *> out;
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i); p && p->currentView())
+            out << p->currentView();
+    return out;
+}
+
+// ------------------------------------------------------------------- 開檔
 
 DocumentView *DocumentArea::createView()
 {
-    auto *view = new DocumentView(m_cache, m_splitter);
+    auto *view = new DocumentView(m_cache, this);
     view->setTheme(m_mode);
-    view->hide();
-    m_splitter->addWidget(view);
-    wire(view);
+    wireView(view);
     return view;
 }
 
-void DocumentArea::wire(DocumentView *view)
+void DocumentArea::wireView(DocumentView *view)
 {
     connect(view, &DocumentView::titleChanged, this, [this, view] {
-        updateTabText(view);
+        if (PaneGroup *p = paneOf(view))
+            p->refreshTabText(view);
         if (view == activeView())
             Q_EMIT activeViewChanged();
     });
@@ -130,152 +389,84 @@ void DocumentArea::wire(DocumentView *view)
             Q_EMIT currentTocIndexChanged(i);
     });
     connect(view, &DocumentView::linkActivated, this, [this, view](const QUrl &url) {
-        // 連結一律在觸發它的那個分頁裡導航
-        if (view != activeView())
-            setActiveIndex(indexOf(view));
+        if (PaneGroup *p = paneOf(view)) {
+            setActivePane(p);
+            p->setCurrentIndex(p->indexOf(view));
+        }
         Q_EMIT linkActivated(url);
     });
     connect(view, &DocumentView::statusMessage, this, &DocumentArea::statusMessage);
 }
 
-void DocumentArea::updateTabText(DocumentView *view)
-{
-    const int i = indexOf(view);
-    if (i < 0)
-        return;
-    const QString title = view->title();
-    m_tabBar->setTabText(i, title.isEmpty() ? QStringLiteral("(未命名)") : title);
-    m_tabBar->setTabToolTip(i, view->path());
-}
-
 DocumentView *DocumentArea::openFile(const QString &path)
 {
-    const int existing = indexOfPath(path);
-    if (existing >= 0) {
-        setActiveIndex(existing);
-        return viewAt(existing);
+    const QString abs = QFileInfo(path).absoluteFilePath();
+
+    // 已經開過就切過去，不論它在哪一格
+    for (int i = 0; i < m_splitter->count(); ++i) {
+        PaneGroup *pane = paneAt(i);
+        if (!pane)
+            continue;
+        const int at = pane->indexOfPath(abs);
+        if (at >= 0) {
+            setActivePane(pane);
+            pane->setCurrentIndex(at);
+            Q_EMIT activeViewChanged();
+            return pane->viewAt(at);
+        }
     }
+
+    if (!m_activeGroup)
+        setActivePane(paneAt(0));
 
     DocumentView *view = createView();
 
     // 先掛上分頁並讓它可見，**再**載入文件：隱藏的 widget 不會排版，
     // QTextDocument 的 loadResource 就不會被呼叫，圖片尺寸會全部變成 0。
-    const int index = m_tabBar->addTab(QFileInfo(path).fileName());
-    m_tabBar->setTabData(index, QVariant::fromValue(view));
-    m_tabBar->setCurrentIndex(index);
-    updateVisibility();
+    const int index = m_activeGroup->addView(view);
+    m_activeGroup->setCurrentIndex(index);
+    updatePlaceholder();
 
     if (!view->openFile(path)) {
-        m_tabBar->removeTab(index);
-        view->setParent(nullptr);
-        view->deleteLater();
-        updateVisibility();
+        m_activeGroup->removeView(index);
+        updatePlaceholder();
         return nullptr;
     }
 
-    updateTabText(view);
+    m_activeGroup->refreshTabText(view);
     Q_EMIT tabsChanged();
     Q_EMIT activeViewChanged();
     return view;
 }
 
-void DocumentArea::closeTab(int index)
-{
-    DocumentView *view = viewAt(index);
-    if (!view)
-        return;
-
-    m_tabBar->removeTab(index);
-    view->setParent(nullptr);
-    view->deleteLater();
-
-    updateVisibility();
-    Q_EMIT tabsChanged();
-    Q_EMIT activeViewChanged();
-}
-
-void DocumentArea::closeActiveTab()
-{
-    closeTab(m_tabBar->currentIndex());
-}
-
-void DocumentArea::nextTab()
-{
-    if (m_tabBar->count() > 1)
-        m_tabBar->setCurrentIndex((m_tabBar->currentIndex() + 1) % m_tabBar->count());
-}
-
-void DocumentArea::previousTab()
-{
-    if (m_tabBar->count() > 1)
-        m_tabBar->setCurrentIndex(
-            (m_tabBar->currentIndex() - 1 + m_tabBar->count()) % m_tabBar->count());
-}
-
-void DocumentArea::setCompareColumns(int columns)
-{
-    const int wanted = qBound(1, columns, MaxCompareColumns);
-    if (m_compareColumns == wanted)
-        return;
-    m_compareColumns = wanted;
-    updateVisibility();
-    Q_EMIT statusMessage(wanted == 1
-                             ? QStringLiteral("已離開比較模式")
-                             : QStringLiteral("比較模式：%1 欄").arg(wanted));
-}
-
-QList<DocumentView *> DocumentArea::visibleViews() const
-{
-    QList<DocumentView *> out;
-    for (int i = 0; i < m_tabBar->count(); ++i)
-        if (DocumentView *v = viewAt(i); v && v->isVisible())
-            out << v;
-    return out;
-}
-
-void DocumentArea::updateVisibility()
-{
-    const int n = m_tabBar->count();
-    m_placeholder->setVisible(n == 0);
-    m_splitter->setVisible(n > 0);
-    if (n == 0)
-        return;
-
-    const int columns = qBound(1, m_compareColumns, n);
-    // 從目前分頁起算連續 columns 個；右邊不夠就把視窗往左滑，確保滿欄
-    const int start = qBound(0, qMin(m_tabBar->currentIndex(), n - columns), n - columns);
-
-    for (int i = 0; i < n; ++i)
-        if (DocumentView *v = viewAt(i))
-            v->setVisible(i >= start && i < start + columns);
-}
+// ----------------------------------------------------------- 全域操作
 
 void DocumentArea::setTheme(Theme::Mode mode)
 {
     m_mode = mode;
-    for (int i = 0; i < m_tabBar->count(); ++i)
+    for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->setTheme(mode);
 }
 
 void DocumentArea::zoomIn()
 {
-    // 縮放套用到全部分頁，比較模式下各欄字級才會一致
-    for (int i = 0; i < m_tabBar->count(); ++i)
+    // 縮放套用到全部分頁，分割時各格字級才會一致
+    for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->zoomIn();
 }
 
 void DocumentArea::zoomOut()
 {
-    for (int i = 0; i < m_tabBar->count(); ++i)
+    for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->zoomOut();
 }
 
 void DocumentArea::resetZoom()
 {
-    for (int i = 0; i < m_tabBar->count(); ++i)
+    for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->resetZoom();
 }
