@@ -378,10 +378,14 @@ void MainWindow::onReloadTriggered()
 
 void MainWindow::setMode(Theme::Mode mode)
 {
-    if (m_mode == mode && (m_actWhite->isChecked() || m_actBlack->isChecked()))
+    // m_themeApplied 這個旗標的意義：啟動時就算 mode 沒變也要套一次 palette，
+    // 否則整個 app 會沿用系統（GTK）主題的底色，跟文件內容的主題對不起來 ——
+    // 實際踩過：視窗是深藍灰色，既不是白色主題也不是黑色主題。
+    if (m_mode == mode && m_themeApplied)
         return;
 
     m_mode = mode;
+    m_themeApplied = true;
     (mode == Theme::Dark ? m_actBlack : m_actWhite)->setChecked(true);
     m_area->setTheme(mode);
 
@@ -527,7 +531,8 @@ void MainWindow::loadSettings()
     restoreGeometry(s.value(QStringLiteral("window/geometry")).toByteArray());
     restoreState(s.value(QStringLiteral("window/state")).toByteArray());
 
-    const bool dark = s.value(QStringLiteral("view/dark"), false).toBool();
+    // 預設黑色主題
+    const bool dark = s.value(QStringLiteral("view/dark"), true).toBool();
     setMode(dark ? Theme::Dark : Theme::Light);
 
     const bool sidebarVisible = s.value(QStringLiteral("view/sidebar"), true).toBool();

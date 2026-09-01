@@ -68,6 +68,7 @@ void DocumentArea::wirePane(PaneGroup *pane)
         setActivePane(pane);
         pane->removeView(index);
         pruneEmptyPanes();
+        refreshLayout();
         updatePlaceholder();
         Q_EMIT tabsChanged();
         Q_EMIT activeViewChanged();
@@ -110,6 +111,26 @@ void DocumentArea::refreshPaneIndicators()
     for (int i = 0; i < m_splitter->count(); ++i)
         if (PaneGroup *p = paneAt(i))
             p->setActive(p == m_activeGroup, multi);
+}
+
+void DocumentArea::refreshLayout()
+{
+    const int panes = paneCount();
+    if (panes > 1) {
+        // QSplitter 對新插入的 widget 只給 sizeHint 那麼寬，原本那格會霸住幾乎
+        // 全部空間 —— 實際踩過：拖曳新建的面板只剩一百多 px，內容逐字換行。
+        const int total = qMax(m_splitter->width(), panes * 240);
+        m_splitter->setSizes(QList<int>(panes, total / panes));
+    }
+    m_splitter->updateGeometry();
+
+    // 拖放結束後 X11 不一定會送重繪事件，殘影會留在畫面上（內容看起來蓋到
+    // 分頁列）。這裡明確要求整區重畫。
+    for (int i = 0; i < panes; ++i)
+        if (PaneGroup *p = paneAt(i))
+            p->update();
+    m_splitter->update();
+    update();
 }
 
 void DocumentArea::updatePlaceholder()
@@ -168,6 +189,7 @@ void DocumentArea::setPaneCount(int panes)
         setActivePane(paneAt(0));
     pruneEmptyPanes();
     refreshPaneIndicators();
+    refreshLayout();
     updatePlaceholder();
     Q_EMIT statusMessage(paneCount() == 1 ? QStringLiteral("單一面板")
                                           : QStringLiteral("已分割成 %1 格").arg(paneCount()));
@@ -200,6 +222,7 @@ void DocumentArea::moveActiveTabToPane(int delta)
     dest->setCurrentIndex(dest->addView(view));
     setActivePane(dest);
     pruneEmptyPanes();
+    refreshLayout();
     updatePlaceholder();
     Q_EMIT tabsChanged();
     Q_EMIT activeViewChanged();
@@ -245,6 +268,7 @@ void DocumentArea::moveTabToPane(PaneGroup *src, int index, PaneGroup *target,
     dest->setCurrentIndex(dest->addView(view));
     setActivePane(dest);
     pruneEmptyPanes();
+    refreshLayout();
     updatePlaceholder();
     Q_EMIT tabsChanged();
     Q_EMIT activeViewChanged();
@@ -323,6 +347,7 @@ void DocumentArea::closeTab(int index)
         return;
     pane->removeView(pane->indexOf(view));
     pruneEmptyPanes();
+    refreshLayout();
     updatePlaceholder();
     Q_EMIT tabsChanged();
     Q_EMIT activeViewChanged();
@@ -333,6 +358,7 @@ void DocumentArea::closeActiveTab()
     if (m_activeGroup && m_activeGroup->count() > 0) {
         m_activeGroup->removeView(m_activeGroup->currentIndex());
         pruneEmptyPanes();
+        refreshLayout();
         updatePlaceholder();
         Q_EMIT tabsChanged();
         Q_EMIT activeViewChanged();

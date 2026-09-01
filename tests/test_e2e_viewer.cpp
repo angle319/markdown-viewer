@@ -487,13 +487,16 @@ void TestE2eViewer::themeSwitchKeepsTocAndScroll()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
-    browser()->verticalScrollBar()->setValue(120);
-    const int before = browser()->verticalScrollBar()->value();
-    const QColor bgBefore = browser()->palette().color(QPalette::Base);
-
     QAction *black = actionNamed(QStringLiteral("黑色主題"));
     QAction *white = actionNamed(QStringLiteral("白色主題"));
     QVERIFY(black && white);
+
+    // 明確設定起始主題，不要假設預設值（預設已改為黑色）
+    white->trigger();
+
+    browser()->verticalScrollBar()->setValue(120);
+    const int before = browser()->verticalScrollBar()->value();
+    const QColor bgBefore = browser()->palette().color(QPalette::Base);
 
     black->trigger();
     QTRY_VERIFY(browser()->palette().color(QPalette::Base) != bgBefore);

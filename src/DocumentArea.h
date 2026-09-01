@@ -84,6 +84,8 @@ private:
     void setActivePane(PaneGroup *pane);
     void pruneEmptyPanes();
     void refreshPaneIndicators();
+    /// 結構變動後重新配置：平均分配面板寬度並強制重繪。
+    void refreshLayout();
     void updatePlaceholder();
     PaneGroup *paneOf(DocumentView *view) const;
     void onTabDropped(PaneGroup *target, PaneGroup::DropZone zone);

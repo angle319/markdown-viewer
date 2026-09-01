@@ -140,7 +140,11 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 
 ## 主題與對比
 
-兩套主題：**白色**（`#ffffff`）與**黑色**（`#000000`）。
+兩套主題：**白色**（`#ffffff`）與**黑色**（`#000000`），**預設黑色**。
+
+主題在啟動時就無條件套用一次（不是等使用者切換才套）。否則整個 app 會沿用系統
+GTK 主題的底色，跟文件內容的主題對不起來 —— 實際踩過：視窗是深藍灰色，
+既不是白色也不是黑色。
 
 對比是硬性要求而非美感偏好，全部用 WCAG 2.1 相對亮度計算並由測試釘住門檻：
 正文 ≥ 7:1、次要文字與連結 ≥ 4.5:1、框線等非文字元素 ≥ 3:1。
@@ -198,7 +202,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-129 個測試函式、8 個套件：
+131 個測試函式、8 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -209,7 +213,7 @@ ctest --test-dir build --output-on-failure
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
 | e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
-| e2e_tabs | 21 | 分頁、分割面板、拖曳分割、各分頁獨立監看、全域操作 |
+| e2e_tabs | 23 | 分頁、分割面板、拖曳分割、面板幾何不變式、各分頁獨立監看 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。

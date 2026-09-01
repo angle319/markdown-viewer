@@ -1,4 +1,6 @@
 #include <QtTest>
+
+#include <algorithm>
 #include <QAction>
 #include <QDir>
 #include <QFile>
@@ -49,6 +51,8 @@ private slots:
     void droppingTabIntoAnotherPaneMovesIt();
     void emptyPaneIsRemovedAutomatically();
     void activePaneIsMarkedOnlyWhenSplit();
+    void paneGeometryStaysSaneAfterMoves();
+    void panesGetComparableWidths();
 
     // --- 全域操作套用到所有分頁 ---
     void themeAppliesToEveryTab();
@@ -448,6 +452,114 @@ void TestE2eTabs::activePaneIsMarkedOnlyWhenSplit()
     // 併回一格後標示消失
     area()->setPaneCount(1);
     QVERIFY(!area()->paneAt(0)->isActiveIndicatorVisible());
+}
+
+/// 每次結構變動後都要成立的不變式：
+///  - 每個 DocumentView 都在某一格的堆疊裡（不會變成孤兒或直接掛在面板上）
+///  - 只有各格的當前文件是可見的
+///  - 可見的文件不會蓋到分頁列（幾何要在分頁列下方）
+static void checkPaneInvariants(DocumentArea *area, const char *where)
+{
+    for (int i = 0; i < area->paneCount(); ++i) {
+        PaneGroup *pane = area->paneAt(i);
+        QVERIFY2(pane, where);
+
+        for (int t = 0; t < pane->count(); ++t) {
+            DocumentView *v = pane->viewAt(t);
+            QVERIFY2(v, where);
+
+            // 必須是這一格的後代，而且不是直接掛在 PaneGroup 上
+            QVERIFY2(pane->isAncestorOf(v),
+                     qPrintable(QStringLiteral("%1: 文件不在面板裡").arg(QLatin1String(where))));
+            QVERIFY2(v->parentWidget() != pane,
+                     qPrintable(QStringLiteral("%1: 文件直接掛在 PaneGroup 上，"
+                                               "會蓋到分頁列").arg(QLatin1String(where))));
+
+            const bool shouldShow = (t == pane->currentIndex());
+            QVERIFY2(v->isVisibleTo(pane) == shouldShow,
+                     qPrintable(QStringLiteral("%1: 面板 %2 的分頁 %3 可見性不對")
+                                    .arg(QLatin1String(where)).arg(i).arg(t)));
+
+            if (shouldShow) {
+                // 內容必須落在分頁列下方。
+                // 注意座標系：v->geometry() 是相對於它的父層（QStackedWidget），
+                // 分頁列的 geometry 則是相對於 PaneGroup，要先 mapTo 同一個座標系。
+                const int contentTop = v->mapTo(pane, QPoint(0, 0)).y();
+                const int tabBottom = pane->tabBar()->geometry().bottom();
+                QVERIFY2(contentTop >= tabBottom,
+                         qPrintable(QStringLiteral("%1: 面板 %2 的內容蓋到分頁列 "
+                                                   "(content top=%3, tabbar bottom=%4)")
+                                        .arg(QLatin1String(where)).arg(i)
+                                        .arg(contentTop).arg(tabBottom)));
+                QVERIFY2(v->width() <= pane->width(),
+                         qPrintable(QStringLiteral("%1: 面板 %2 的內容比面板寬")
+                                        .arg(QLatin1String(where)).arg(i)));
+            }
+        }
+    }
+}
+
+void TestE2eTabs::paneGeometryStaysSaneAfterMoves()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "開三個分頁後");
+
+    area()->setPaneCount(2);
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "分割成 2 格後");
+
+    area()->setPaneCount(3);
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "分割成 3 格後");
+
+    // 拖曳搬移（真正踩到跑版的那條路徑）
+    area()->moveTabToPane(area()->paneAt(2), 0, area()->paneAt(0),
+                          PaneGroup::DropZone::Into);
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "把分頁併入別格後");
+
+    area()->moveTabToPane(area()->paneAt(0), 0, area()->paneAt(1),
+                          PaneGroup::DropZone::SplitRight);
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "拖到邊緣分割後");
+
+    // 拖曳新建出來的面板也要有合理寬度 —— 實際踩過：新格被擠到只剩一百多 px，
+    // 表格與行內 code 被逼到逐字換行
+    for (int i = 0; i < area()->paneCount(); ++i)
+        QVERIFY2(area()->paneAt(i)->width() > 200,
+                 qPrintable(QStringLiteral("拖曳分割後面板 %1 只有 %2px")
+                                .arg(i).arg(area()->paneAt(i)->width())));
+
+    area()->setPaneCount(1);
+    QTest::qWait(50);
+    checkPaneInvariants(area(), "併回單格後");
+}
+
+void TestE2eTabs::panesGetComparableWidths()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+
+    area()->setPaneCount(3);
+    QTest::qWait(50);
+
+    QList<int> widths;
+    for (int i = 0; i < area()->paneCount(); ++i)
+        widths << area()->paneAt(i)->width();
+
+    const int maxW = *std::max_element(widths.begin(), widths.end());
+    const int minW = *std::min_element(widths.begin(), widths.end());
+    qInfo() << "面板寬度" << widths;
+
+    // 新分割出來的面板不能被擠成一條 —— 實際踩過：內容窄到逐字換行
+    QVERIFY2(minW > 200,
+             qPrintable(QStringLiteral("最窄的面板只有 %1px").arg(minW)));
+    QVERIFY2(maxW <= minW * 2,
+             qPrintable(QStringLiteral("面板寬度差太多: %1 vs %2").arg(minW).arg(maxW)));
 }
 
 // ------------------------------------------------ 全域操作套用到所有分頁

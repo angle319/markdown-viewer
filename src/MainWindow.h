@@ -82,4 +82,5 @@ private:
     QLabel *m_statusRight = nullptr;
 
     Theme::Mode m_mode = Theme::Light;
+    bool m_themeApplied = false;   ///< 啟動時要無條件套用一次
 };

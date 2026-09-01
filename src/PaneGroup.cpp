@@ -114,6 +114,8 @@ PaneGroup::PaneGroup(QWidget *parent)
 
     m_dropHint = new QRubberBand(QRubberBand::Rectangle, this);
     setAcceptDrops(true);
+    // 擠到比這更窄，表格與行內 code 會被逼到逐字換行
+    setMinimumWidth(240);
     installEventFilter(this);
 }
 
