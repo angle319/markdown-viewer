@@ -274,6 +274,16 @@ MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
 - **使用者看得到的字串用繁體中文** —— 選單、對話框、狀態列。
 - **文件雙語**：`README.md` / `README.zh-TW.md` 與 `spec.md` / `spec.zh-TW.md`。
   英文為正典，因為 RFC 2119 的 SHALL/SHOULD 本來就是英文關鍵字。
+- **Commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/)**，
+  以英文撰寫，並用 commitlint 檢查：
+
+  ```
+  npx --yes --package @commitlint/cli --package @commitlint/config-conventional \
+    commitlint --from <ref> --to HEAD
+  ```
+
+  兩個值得記的慣例：merge commit 用 `chore:`，避免產生 changelog 時同一份工作被列兩次；
+  subject 開頭小寫，因為 config-conventional 的 `subject-case` 規則禁止 sentence-case。
 
 ## 狀態
 

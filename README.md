@@ -286,6 +286,17 @@ what the behaviour *is*, the design document says *why it ended up that way*.
 - **Documentation is bilingual**: `README.md` / `README.zh-TW.md` and
   `spec.md` / `spec.zh-TW.md`. English is canonical, since RFC 2119's SHALL/SHOULD are English
   keywords.
+- **Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)**, in
+  English, checked with commitlint:
+
+  ```
+  npx --yes --package @commitlint/cli --package @commitlint/config-conventional \
+    commitlint --from <ref> --to HEAD
+  ```
+
+  Two conventions worth knowing: merge commits use `chore:` so a generated changelog does not
+  list the same work twice, and subjects start lower case because config-conventional's
+  `subject-case` rule forbids sentence-case.
 
 ## Status
 
