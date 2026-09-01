@@ -6,6 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Enable the committed git hooks. Idempotent, and it means anyone who builds
+# picks them up without a separate setup step.
+./scripts/setup-dev.sh >/dev/null 2>&1 || true
+
 BUILD_DIR="${BUILD_DIR:-build}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 

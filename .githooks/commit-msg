@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Checks the commit message against Conventional Commits.
+# Enabled by scripts/setup-dev.sh (build.sh runs it for you).
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check-commit-msg.py" "$1"

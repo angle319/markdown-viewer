@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Runs the repository convention checks before every commit.
+# Enabled by scripts/setup-dev.sh (build.sh runs it for you).
+exec "$(git rev-parse --show-toplevel)/scripts/check-repo.sh"
