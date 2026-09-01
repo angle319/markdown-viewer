@@ -62,7 +62,9 @@ npm i -g @mermaid-js/mermaid-cli
 | `Alt+Shift+1` | 白色主題 |
 | `Alt+Shift+2` | 黑色主題 |
 | `Alt+Shift+T` | 切換主題 |
-| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | 縮放 |
+| `Ctrl+=` / `Ctrl++` | 放大字型 |
+| `Ctrl+-` | 縮小字型 |
+| `Ctrl+0` | 原始大小 |
 
 ### 路徑列
 
@@ -123,11 +125,16 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 | 巢狀清單 | `setIndentWidth(20)` |
 | 標題字級 | H1→H6 為 23/17/14/12.5/11.5/11pt，正文 11pt；H6 用次要色 |
 | 行高 | 155%（Qt 預設約單行，中文太擠）；程式碼區塊同值 |
+| 字型縮放 | 每階 1.1 倍，範圍 0.5×–3×；標題與內文等比縮放 |
 | 段距 | 段落上下各 10px；清單項目 0、清單整體上下 4px |
 
 行內 code 的顏色刻意與連結**色相差 > 110°**。extension 那邊兩者同色，實際上分不出
 「這是程式碼」還是「這是可點的連結」。另外區分也不只靠顏色：連結有底線、
 行內 code 有 chip 與等寬字。
+
+**字級一律不用 CSS 設。** 正文用 `QTextDocument::setDefaultFont()`，標題用
+`applyHeadingScale()` 明確指定。stylesheet 裡的 `body { font-size }` 實測對
+QTextDocument **完全沒有生效** —— 內文一直是 widget 的系統預設字級（這台 9pt）。
 
 **標題字級不是用 CSS 設的。** `QTextFormat::FontSizeAdjustment` 這個屬性只要存在
 （即使值是 0），Qt 就完全忽略 `FontPointSize`，改用「預設字級 × 層級係數」——
@@ -208,7 +215,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-136 個測試函式、8 個套件：
+139 個測試函式、8 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -218,7 +225,7 @@ ctest --test-dir build --output-on-failure
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
 | theme | 17 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code、分頁狀態 |
 | e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
-| e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_regression | 29 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
 | e2e_tabs | 27 | 分頁、分割面板、拖曳分割、幾何不變式、右鍵選單、獨立監看 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時

@@ -686,7 +686,8 @@ void TestE2eTabs::zoomAppliesToEveryTab()
 
     QList<qreal> before;
     for (int i = 0; i < area()->count(); ++i)
-        before << area()->viewAt(i)->findChild<QTextBrowser *>()->font().pointSizeF();
+        before << area()->viewAt(i)->findChild<QTextBrowser *>()
+                      ->document()->defaultFont().pointSizeF();
 
     QAction *zoomIn = nullptr;
     for (QAction *a : m_win->findChildren<QAction *>())
@@ -697,7 +698,8 @@ void TestE2eTabs::zoomAppliesToEveryTab()
 
     // 比較模式下各欄字級必須一致，所以縮放要套用到全部分頁
     for (int i = 0; i < area()->count(); ++i) {
-        const qreal now = area()->viewAt(i)->findChild<QTextBrowser *>()->font().pointSizeF();
+        const qreal now = area()->viewAt(i)->findChild<QTextBrowser *>()
+                              ->document()->defaultFont().pointSizeF();
         QVERIFY2(now > before.at(i),
                  qPrintable(QStringLiteral("分頁 %1 沒有放大: %2 → %3")
                                 .arg(i).arg(before.at(i)).arg(now)));

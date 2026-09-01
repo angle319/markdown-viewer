@@ -292,17 +292,28 @@ void MainWindow::buildMenus()
     addAction(actMoveLeft);
 
     viewMenu->addSeparator();
+    // QKeySequence::ZoomIn 在 Linux 上解析成 Ctrl++，而 '+' 在一般鍵盤要按
+    // Ctrl+Shift+= —— 所以只綁它的話，使用者按最自然的 Ctrl+= 什麼都不會發生。
+    // 這裡把 Ctrl+= 與數字鍵盤的 +/- 一起綁上。
     auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
-    actZoomIn->setShortcut(QKeySequence::ZoomIn);
+    actZoomIn->setShortcuts({ QKeySequence::ZoomIn,
+                              QKeySequence(Qt::CTRL | Qt::Key_Equal),
+                              QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Equal),
+                              QKeySequence(Qt::CTRL | Qt::Key_Plus) });
     connect(actZoomIn, &QAction::triggered, this, [this] { m_area->zoomIn(); });
+    addAction(actZoomIn);
 
     auto *actZoomOut = viewMenu->addAction(QStringLiteral("縮小"));
-    actZoomOut->setShortcut(QKeySequence::ZoomOut);
+    actZoomOut->setShortcuts({ QKeySequence::ZoomOut,
+                               QKeySequence(Qt::CTRL | Qt::Key_Minus),
+                               QKeySequence(Qt::CTRL | Qt::Key_Underscore) });
     connect(actZoomOut, &QAction::triggered, this, [this] { m_area->zoomOut(); });
+    addAction(actZoomOut);
 
     auto *actZoomReset = viewMenu->addAction(QStringLiteral("原始大小"));
     actZoomReset->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
     connect(actZoomReset, &QAction::triggered, this, [this] { m_area->resetZoom(); });
+    addAction(actZoomReset);
 
     viewMenu->addSeparator();
     auto *actFocusPath = viewMenu->addAction(QStringLiteral("聚焦路徑列"));

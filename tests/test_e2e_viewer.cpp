@@ -744,7 +744,9 @@ void TestE2eViewer::zoomChangesFontSizeAndResets()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
-    const qreal base = browser()->font().pointSizeF();
+    // 縮放改由文件的預設字型控制（不再用 QTextEdit::zoomIn 動 widget 字型），
+    // 因為那樣標題那些明確設定過 pointSize 的片段不會跟著變
+    const qreal base = browser()->document()->defaultFont().pointSizeF();
     QVERIFY(base > 0);
 
     QAction *zin = actionNamed(QStringLiteral("放大"));
@@ -752,17 +754,19 @@ void TestE2eViewer::zoomChangesFontSizeAndResets()
     QAction *zreset = actionNamed(QStringLiteral("原始大小"));
     QVERIFY(zin && zout && zreset);
 
+    const auto size = [this] { return browser()->document()->defaultFont().pointSizeF(); };
+
     zin->trigger();
     zin->trigger();
-    QVERIFY2(browser()->font().pointSizeF() > base, "放大沒有生效");
+    QVERIFY2(size() > base, "放大沒有生效");
 
     zreset->trigger();
-    QCOMPARE(browser()->font().pointSizeF(), base);
+    QCOMPARE(size(), base);
 
     zout->trigger();
-    QVERIFY2(browser()->font().pointSizeF() < base, "縮小沒有生效");
+    QVERIFY2(size() < base, "縮小沒有生效");
     zreset->trigger();
-    QCOMPARE(browser()->font().pointSizeF(), base);
+    QCOMPARE(size(), base);
 }
 
 void TestE2eViewer::sidebarCanBeHidden()

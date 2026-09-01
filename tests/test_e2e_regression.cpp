@@ -18,6 +18,7 @@
 #include "DocumentView.h"
 #include "MainWindow.h"
 #include "Theme.h"
+#include "render/TextBrowserBackend.h"
 #include "core/MarkdownParser.h"
 
 #ifndef SAMPLE_MD
@@ -69,6 +70,9 @@ private slots:
     void tableUsesHorizontalRulesOnly();
     void headingSizesFollowThemeScale();
     void bodyTextUsesComfortableLineHeight();
+    void zoomScalesBodyAndHeadingsTogether();
+    void zoomIsClampedAndResettable();
+    void zoomShortcutsIncludeCtrlEquals();
     void wideTableOpensQuickly();
     void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
@@ -657,6 +661,102 @@ void TestE2eRegression::wideTableOpensQuickly()
     QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
 }
 
+/// 找出含有某段文字的片段的實際字級（-1 表示找不到）
+static qreal fragmentPointSize(const QTextDocument *doc, const QString &needle)
+{
+    for (QTextBlock b = doc->begin(); b.isValid(); b = b.next())
+        for (QTextBlock::iterator it = b.begin(); !it.atEnd(); ++it) {
+            const QTextFragment f = it.fragment();
+            if (f.isValid() && f.text().contains(needle))
+                return f.charFormat().font().pointSizeF();
+        }
+    return -1;
+}
+
+void TestE2eRegression::zoomScalesBodyAndHeadingsTogether()
+{
+    // 使用者要 Ctrl+/Ctrl- 縮放字型。實測發現原本的實作有兩個問題：
+    //  1. 標題完全不縮放 —— applyHeadingScale() 寫死了 pointSize
+    //  2. 內文其實是 widget 的系統預設字級（9pt），stylesheet 的
+    //     `body { font-size }` 根本沒生效
+    // 現在改成自己管縮放倍率 + setDefaultFont，兩者都會等比變化。
+    const QTextDocument *doc = browser()->document();
+
+    const qreal bodyBefore = fragmentPointSize(doc, QStringLiteral("這份文件刻意"));
+    const qreal h1Before = fragmentPointSize(doc, QStringLiteral("驗證文件"));
+    QVERIFY(bodyBefore > 0 && h1Before > 0);
+    QCOMPARE(bodyBefore, Theme::BodyPointSize);
+    QCOMPARE(h1Before, Theme::headingPointSize(1));
+
+    actionNamed(QStringLiteral("放大"))->trigger();
+    actionNamed(QStringLiteral("放大"))->trigger();
+
+    const qreal bodyAfter = fragmentPointSize(browser()->document(),
+                                              QStringLiteral("這份文件刻意"));
+    const qreal h1After = fragmentPointSize(browser()->document(),
+                                            QStringLiteral("驗證文件"));
+    qInfo() << "內文" << bodyBefore << "→" << bodyAfter
+            << " H1" << h1Before << "→" << h1After;
+
+    QVERIFY2(bodyAfter > bodyBefore, "內文沒有放大");
+    QVERIFY2(h1After > h1Before, "標題沒有放大 —— 字級被寫死了");
+
+    // 關鍵：兩者要等比，否則放大後版面比例會跑掉
+    const double bodyRatio = bodyAfter / bodyBefore;
+    const double h1Ratio = h1After / h1Before;
+    QVERIFY2(qAbs(bodyRatio - h1Ratio) < 0.02,
+             qPrintable(QStringLiteral("內文放大 %1 倍但標題放大 %2 倍")
+                            .arg(bodyRatio).arg(h1Ratio)));
+
+    actionNamed(QStringLiteral("原始大小"))->trigger();
+    QCOMPARE(fragmentPointSize(browser()->document(), QStringLiteral("這份文件刻意")),
+             bodyBefore);
+    QCOMPARE(fragmentPointSize(browser()->document(), QStringLiteral("驗證文件")),
+             h1Before);
+}
+
+void TestE2eRegression::zoomIsClampedAndResettable()
+{
+    QAction *zin = actionNamed(QStringLiteral("放大"));
+    QAction *zout = actionNamed(QStringLiteral("縮小"));
+    QVERIFY(zin && zout);
+
+    for (int i = 0; i < 40; ++i)
+        zin->trigger();
+    const qreal maxBody = fragmentPointSize(browser()->document(),
+                                            QStringLiteral("這份文件刻意"));
+    QVERIFY2(maxBody <= Theme::BodyPointSize * TextBrowserBackend::MaxZoom + 0.01,
+             qPrintable(QStringLiteral("放大沒有上限: %1pt").arg(maxBody)));
+
+    for (int i = 0; i < 80; ++i)
+        zout->trigger();
+    const qreal minBody = fragmentPointSize(browser()->document(),
+                                            QStringLiteral("這份文件刻意"));
+    QVERIFY2(minBody >= Theme::BodyPointSize * TextBrowserBackend::MinZoom - 0.01,
+             qPrintable(QStringLiteral("縮小沒有下限: %1pt").arg(minBody)));
+    QVERIFY2(minBody > 3.0, "縮到看不見了");
+
+    actionNamed(QStringLiteral("原始大小"))->trigger();
+    QCOMPARE(fragmentPointSize(browser()->document(), QStringLiteral("這份文件刻意")),
+             Theme::BodyPointSize);
+}
+
+void TestE2eRegression::zoomShortcutsIncludeCtrlEquals()
+{
+    // 這是使用者實際踩到的：QKeySequence::ZoomIn 在 Linux 上是 Ctrl++，
+    // 而 '+' 一般鍵盤要按 Ctrl+Shift+=，所以按最自然的 Ctrl+= 沒有反應。
+    const QList<QKeySequence> in = actionNamed(QStringLiteral("放大"))->shortcuts();
+    QVERIFY2(in.contains(QKeySequence(Qt::CTRL | Qt::Key_Equal)),
+             "放大沒有綁 Ctrl+= —— 一般鍵盤按不到 Ctrl++");
+    QVERIFY(in.contains(QKeySequence::ZoomIn));
+
+    const QList<QKeySequence> out = actionNamed(QStringLiteral("縮小"))->shortcuts();
+    QVERIFY(out.contains(QKeySequence(Qt::CTRL | Qt::Key_Minus)));
+
+    QCOMPARE(actionNamed(QStringLiteral("原始大小"))->shortcut(),
+             QKeySequence(Qt::CTRL | Qt::Key_0));
+}
+
 void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()
 {
     bool found = false;
@@ -827,6 +927,22 @@ void TestE2eRegression::dumpScreenshotsIfRequested()
     }
 
     actionNamed(Theme::name(Theme::Light))->trigger();
+
+    // 縮放級別：驗證標題與內文等比放大，版面不跑掉
+    QAction *zin = actionNamed(QStringLiteral("放大"));
+    QAction *zreset = actionNamed(QStringLiteral("原始大小"));
+    for (const int steps : { 0, 3, 6 }) {
+        zreset->trigger();
+        for (int i = 0; i < steps; ++i)
+            zin->trigger();
+        browser()->verticalScrollBar()->setValue(0);
+        QTest::qWait(120);
+        const QString path = QStringLiteral("%1/zoom-%2.png").arg(dir).arg(steps, 2, 10,
+                                                                        QLatin1Char('0'));
+        QVERIFY2(m_win->grab().save(path), qPrintable(path));
+        qInfo() << "已存" << path;
+    }
+    zreset->trigger();
 }
 
 QTEST_MAIN(TestE2eRegression)

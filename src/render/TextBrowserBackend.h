@@ -38,6 +38,14 @@ public:
     void zoomOut() override;
     void resetZoom() override;
 
+    /// 縮放倍率。1.0 為原始大小。
+    void setZoom(qreal factor);
+    qreal zoom() const { return m_zoom; }
+
+    static constexpr qreal ZoomStep = 1.1;
+    static constexpr qreal MinZoom = 0.5;
+    static constexpr qreal MaxZoom = 3.0;
+
 private:
     void render(bool preserveScroll);
     void emitCurrentTocIndex();
@@ -46,6 +54,6 @@ private:
     MermaidCache *m_cache = nullptr;
     Document m_doc;
     Theme::Mode m_mode = Theme::Light;
-    int m_zoomSteps = 0;
+    qreal m_zoom = 1.0;
     int m_lastTocIndex = -2;
 };

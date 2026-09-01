@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QAbstractTextDocumentLayout>
 #include <QPaintEvent>
+#include <QFont>
 #include <QPainter>
 #include <QPainterPath>
 
@@ -142,6 +143,11 @@ public:
     }
 
     void setDark(bool dark) { m_dark = dark; }
+
+    /// 縮放倍率。標題字級是明確設定的（見 applyHeadingScale），
+    /// 不會自動跟著 widget 字型走，所以必須把倍率一起帶進去。
+    void setZoomFactor(qreal factor) { m_zoom = factor; }
+    qreal zoomFactor() const { return m_zoom; }
     Theme::Mode mode() const { return m_dark ? Theme::Dark : Theme::Light; }
 
     /// 保證沒有「看不見的文字」。
@@ -328,7 +334,7 @@ public:
                 // 改用「預設字級 × 層級係數」。實測 H1 設 23pt 卻畫成 18pt、
                 // H5 設 11.5pt 卻畫成 7.2pt。必須清掉，設成 0 沒有用。
                 fmt.clearProperty(QTextFormat::FontSizeAdjustment);
-                fmt.setFontPointSize(Theme::headingPointSize(level));
+                fmt.setFontPointSize(Theme::headingPointSize(level) * m_zoom);
                 fmt.setFontWeight(QFont::Bold);
                 if (level == 6)
                     fmt.setForeground(QColor(c.muted));
@@ -611,6 +617,7 @@ private:
     QHash<QString, QSize> m_logicalSize;
     QHash<QString, bool> m_known;       ///< url → 載入成功與否
     bool m_dark = false;
+    qreal m_zoom = 1.0;
     int m_appliedMargin = -1;
 };
 
@@ -673,6 +680,15 @@ void TextBrowserBackend::render(bool preserveScroll)
     m_view->setPalette(Theme::palette(m_mode));
     m_view->document()->setDefaultStyleSheet(Theme::documentStyleSheet(m_mode));
 
+    // 正文字級用 setDefaultFont 明確設定。
+    // stylesheet 裡的 `body { font-size }` 實測**沒有生效** —— 內文一直是
+    // widget 的系統預設字級（這台是 9pt），所以先前文件裡寫的「正文 11pt」
+    // 是錯的。改用 setDefaultFont 才真的控制得到，縮放也才有單一施力點。
+    QFont baseFont = m_view->document()->defaultFont();
+    baseFont.setPointSizeF(Theme::BodyPointSize * m_zoom);
+    m_view->document()->setDefaultFont(baseFont);
+    m_view->setZoomFactor(m_zoom);
+
     // Qt 預設的縮排單位是 40px，巢狀清單與引用區塊在中文字體下會縮得很誇張。
     // Qt rich-text 不吃 CSS 的 margin-left/padding-left 來調清單縮排，
     // 唯一有效的旋鈕就是文件層級的 indentWidth。
@@ -686,13 +702,6 @@ void TextBrowserBackend::render(bool preserveScroll)
     m_view->applyHeadingScale();
     m_view->applyTableStyling();
     m_view->applyContrastFixups();
-
-    if (m_zoomSteps != 0) {
-        if (m_zoomSteps > 0)
-            m_view->zoomIn(m_zoomSteps);
-        else
-            m_view->zoomOut(-m_zoomSteps);
-    }
 
     m_view->verticalScrollBar()->setValue(scroll);
     m_lastTocIndex = -2;
@@ -728,25 +737,30 @@ void TextBrowserBackend::mermaidReady(const QString &key)
     setScrollValue(scroll);
 }
 
+void TextBrowserBackend::setZoom(qreal factor)
+{
+    const qreal wanted = qBound(MinZoom, factor, MaxZoom);
+    if (qFuzzyCompare(m_zoom, wanted))
+        return;
+    m_zoom = wanted;
+    // 重新套版而不是用 QTextEdit::zoomIn：後者只動 widget 字型，
+    // 標題那些明確設定過 pointSize 的片段不會跟著變。
+    render(true);
+}
+
 void TextBrowserBackend::zoomIn()
 {
-    ++m_zoomSteps;
-    m_view->zoomIn(1);
+    setZoom(m_zoom * ZoomStep);
 }
 
 void TextBrowserBackend::zoomOut()
 {
-    --m_zoomSteps;
-    m_view->zoomOut(1);
+    setZoom(m_zoom / ZoomStep);
 }
 
 void TextBrowserBackend::resetZoom()
 {
-    if (m_zoomSteps > 0)
-        m_view->zoomOut(m_zoomSteps);
-    else if (m_zoomSteps < 0)
-        m_view->zoomIn(-m_zoomSteps);
-    m_zoomSteps = 0;
+    setZoom(1.0);
 }
 
 void TextBrowserBackend::emitCurrentTocIndex()
