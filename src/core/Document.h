@@ -3,25 +3,25 @@
 #include <QString>
 #include <QVector>
 
-/// 目錄（TOC）中的一個標題項。
+/// One heading entry in the table of contents.
 struct TocEntry {
     int level = 1;      ///< 1..6
-    QString text;       ///< 顯示文字，已去除 markdown markup
-    QString anchor;     ///< GitHub 風格 slug，不含前導 '#'
-    int htmlPos = -1;   ///< 在 html 字串中的位置，供捲動反查用
+    QString text;       ///< Display text, with markdown markup stripped
+    QString anchor;     ///< GitHub-style slug, without the leading '#'
+    int htmlPos = -1;   ///< Offset into `html`, used for scroll-position lookup
 };
 
-/// 一個 ```mermaid 區塊。
+/// One ```mermaid fenced block.
 struct MermaidBlock {
-    QString source;     ///< 圖表原始碼
-    QString key;        ///< sha1(source)，作為快取檔名與 mermaid:// URL 的 host
+    QString source;     ///< Diagram source
+    QString key;        ///< sha1(source); the mermaid:// URL host and cache file name
 };
 
-/// 解析結果：可直接餵給 render backend。
+/// Parse result, ready to hand to a render backend.
 struct Document {
-    QString html;                   ///< Qt rich-text 子集的 HTML
+    QString html;                   ///< HTML restricted to Qt's rich-text subset
     QVector<TocEntry> toc;
     QVector<MermaidBlock> mermaid;
-    QString baseDir;                ///< 相對路徑（圖片、連結）解析基準
-    QString title;                  ///< 第一個 H1；沒有則留空由呼叫端用檔名
+    QString baseDir;                ///< Base for resolving relative image and link paths
+    QString title;                  ///< First H1; empty means the caller should use the file name
 };

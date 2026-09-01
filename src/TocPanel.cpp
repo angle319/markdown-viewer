@@ -34,8 +34,9 @@ void TocPanel::setToc(const QVector<TocEntry> &toc)
     m_items.clear();
     m_items.resize(toc.size());
 
-    // 用 (level, item) 堆疊還原巢狀結構。標題層級可以跳號（H1 直接接 H3），
-    // 所以是「找到第一個層級更小的祖先」而不是假設剛好差一級。
+    // Rebuild the nesting with a (level, item) stack. Heading levels may skip
+    // (an H1 followed directly by an H3), so this looks for the first ancestor
+    // with a smaller level rather than assuming a one-level step.
     QVector<QPair<int, QTreeWidgetItem *>> stack;
 
     for (int i = 0; i < toc.size(); ++i) {

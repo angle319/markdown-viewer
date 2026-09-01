@@ -28,7 +28,8 @@ QString escapeText(const QString &s)
     return out;
 }
 
-/// 屬性值用：刻意不動 '&'，避免把 md4c 已產生的 entity 二次轉義。
+/// For attribute values: deliberately leaves '&' alone so that entities md4c
+/// already produced are not escaped a second time.
 QString escapeAttr(const QString &s)
 {
     QString out = s;
@@ -38,7 +39,8 @@ QString escapeAttr(const QString &s)
     return out;
 }
 
-/// GitHub 風格 slug：小寫、空白轉 '-'、丟棄標點、保留 '-' '_' 與非 ASCII（含 CJK）。
+/// GitHub-style slug: lower-cased, whitespace to '-', punctuation dropped,
+/// '-' '_' and non-ASCII (including CJK) preserved.
 QString githubSlug(const QString &text)
 {
     QString out;
@@ -59,13 +61,14 @@ QString attrToString(const MD_ATTRIBUTE &attr)
     return QString::fromUtf8(attr.text, int(attr.size));
 }
 
-/// 圖片 / 連結目標的相對路徑解析。Okular 的 converter.cpp 同樣做 percent-decoding。
+/// Resolves a relative image or link target. Okular's markdown converter does
+/// the same percent-decoding.
 QString resolveLocalTarget(const QString &raw, const QString &baseDir)
 {
     if (raw.isEmpty() || raw.startsWith(QLatin1Char('#')))
         return raw;
     if (!QUrl(raw).scheme().isEmpty())
-        return raw;                       // 已是絕對 URL
+        return raw;                       // Already an absolute URL
     if (baseDir.isEmpty())
         return raw;
 
@@ -91,20 +94,20 @@ struct Renderer {
     Document doc;
     MarkdownParser::Options opt;
 
-    // heading 狀態：anchor 的 slug 只有在讀完整個 heading 後才知道,
-    // 所以記下插入點, 於 leave_block 時回頭 insert。
+    // Heading state: the slug is only known once the whole heading has been
+    // read, so remember where to insert the anchor and go back on leave_block.
     int headingLevel = 0;
     QString headingText;
     int headingAnchorPos = -1;
     int headingStartPos = -1;
     QHash<QString, int> slugSeen;
 
-    // fenced code 狀態
+    // Fenced code state
     bool inCodeBlock = false;
     QString codeLang;
     QString codeText;
 
-    // 圖片 alt 累積（alt 內不能有 markup）
+    // Image alt accumulation (alt text cannot contain markup)
     int imageNesting = 0;
     QString imageAlt;
     QString imageSrc;
@@ -157,7 +160,7 @@ int enterBlock(MD_BLOCKTYPE type, void *detail, void *ud)
         const auto *d = static_cast<MD_BLOCK_LI_DETAIL *>(detail);
         r->html += QLatin1String("<li>");
         if (d->is_task) {
-            // Qt rich-text 不渲染 <input type=checkbox>, 改用字元
+            // Qt rich text does not render <input type=checkbox>; use glyphs
             r->html += (d->task_mark == 'x' || d->task_mark == 'X')
                            ? QString::fromUtf8("\xE2\x98\x91 ")   // U+2611 BALLOT BOX WITH CHECK
                            : QString::fromUtf8("\xE2\x98\x90 ");  // U+2610 BALLOT BOX
@@ -168,7 +171,8 @@ int enterBlock(MD_BLOCKTYPE type, void *detail, void *ud)
         r->html += QLatin1String("<hr>");
         break;
     case MD_BLOCK_TABLE:
-        // 邊框與內距由 render backend 的 applyTableStyling() 統一處理（只有橫線）
+        // Borders and padding are applied by the render backend's
+        // applyTableStyling() (horizontal rules only)
         r->html += QLatin1String("<table cellspacing=\"0\">");
         break;
     case MD_BLOCK_THEAD:
@@ -191,7 +195,7 @@ int enterBlock(MD_BLOCKTYPE type, void *detail, void *ud)
         break;
     }
     case MD_BLOCK_HTML:
-        break; // 內容由 MD_TEXT_HTML 原樣輸出
+        break; // Content is emitted verbatim by MD_TEXT_HTML
     }
     return 0;
 }
@@ -305,7 +309,7 @@ int enterSpan(MD_SPANTYPE type, void *detail, void *ud)
         r->html += QLatin1String("<strong>");
         break;
     case MD_SPAN_DEL:
-        // Qt rich-text 不認 <del>；Okular 的 converter 也做同樣替換
+        // Qt rich text does not know <del>; Okular's converter substitutes too
         r->html += QLatin1String("<s>");
         break;
     case MD_SPAN_U:
@@ -383,7 +387,7 @@ int onText(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *ud)
     const QString s = QString::fromUtf8(text, int(size));
 
     if (r->inCodeBlock) {
-        r->codeText += s;   // 高亮器自己負責 escape
+        r->codeText += s;   // The highlighter does its own escaping
         return 0;
     }
     if (r->imageNesting > 0) {
@@ -401,7 +405,7 @@ int onText(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *ud)
         r->html += escapeText(s);
         break;
     case MD_TEXT_ENTITY:
-        r->html += s;   // 已是 entity，原樣輸出
+        r->html += s;   // Already an entity; emit verbatim
         break;
     case MD_TEXT_BR:
         r->html += QLatin1String("<br>");
@@ -410,7 +414,7 @@ int onText(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *ud)
         r->html += QLatin1Char('\n');
         break;
     case MD_TEXT_HTML:
-        r->html += s;   // 原始 HTML 直接放行
+        r->html += s;   // Raw HTML passes through
         break;
     case MD_TEXT_NULLCHAR:
         r->html += QChar(0xFFFD);

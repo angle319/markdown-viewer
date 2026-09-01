@@ -19,14 +19,15 @@ struct Palette {
 
 const Palette &palette(bool dark)
 {
-    // 全部對著各自的 preBg 算過 WCAG 對比，最低 4.5:1；
-    // 門檻由 tests/test_theme.cpp 的 syntaxColoursAreReadable() 守著。
+    // Every colour below is measured against its own preBg for WCAG contrast,
+    // minimum 4.5:1. The threshold is enforced by syntaxColoursAreReadable()
+    // in tests/test_theme.cpp.
     static const Palette light{
         QStringLiteral("#0b3fbf"),   // keyword  7.57:1
         QStringLiteral("#9b1414"),   // string   7.49:1
         QStringLiteral("#20693f"),   // comment  5.95:1
         QStringLiteral("#0a5f4a"),   // number   6.82:1
-        QStringLiteral("#f2f2f2"),   // preBg（與 Theme::codeBackground 一致）
+        QStringLiteral("#f2f2f2"),   // preBg (matches Theme::codeBackground)
         QStringLiteral("#111111"),   // preFg   16.87:1
     };
     static const Palette night{
@@ -40,10 +41,10 @@ const Palette &palette(bool dark)
     return dark ? night : light;
 }
 
-/// 每個語言的詞法規則。
+/// Lexical rules for one language.
 struct LangSpec {
     QSet<QString> keywords;
-    QStringList lineComments;   ///< 例如 "//" 或 "#"
+    QStringList lineComments;   ///< e.g. "//" or "#"
     bool blockComments = false; ///< /* … */
     bool backtickString = false;
 };
@@ -186,7 +187,7 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
         while (i < n) {
             const QChar c = code.at(i);
 
-            // 行註解
+            // Line comment
             bool handled = false;
             for (const QString &lc : spec->lineComments) {
                 if (code.mid(i, lc.size()) == lc) {
@@ -202,7 +203,7 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
             if (handled)
                 continue;
 
-            // 區塊註解
+            // Block comment
             if (spec->blockComments && c == QLatin1Char('/') && i + 1 < n
                 && code.at(i + 1) == QLatin1Char('*')) {
                 int end = code.indexOf(QLatin1String("*/"), i + 2);
@@ -212,7 +213,7 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
                 continue;
             }
 
-            // 字串 / 字元
+            // String or character literal
             if (c == QLatin1Char('"') || c == QLatin1Char('\'')
                 || (spec->backtickString && c == QLatin1Char('`'))) {
                 const QChar quote = c;
@@ -227,7 +228,8 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
                         break;
                     }
                     if (code.at(j) == QLatin1Char('\n') && quote != QLatin1Char('`'))
-                        break; // 單行字串不跨行，避免整份檔案被吃掉
+                        break; // Single-line strings stop at the newline, so a
+                               // missing quote cannot swallow the whole file
                     ++j;
                 }
                 appendColored(body, code.mid(i, qMin(j, n) - i), pal.string);
@@ -235,7 +237,7 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
                 continue;
             }
 
-            // 數字
+            // Number
             if (c.isDigit()) {
                 int j = i;
                 while (j < n && (code.at(j).isLetterOrNumber() || code.at(j) == QLatin1Char('.')
@@ -246,7 +248,7 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
                 continue;
             }
 
-            // 識別字 / 關鍵字
+            // Identifier or keyword
             if (c.isLetter() || c == QLatin1Char('_')) {
                 int j = i;
                 while (j < n && isIdentChar(code.at(j)))
@@ -265,8 +267,9 @@ QString CodeHighlighter::highlight(const QString &code, const QString &lang, boo
         }
     }
 
-    // 行高與內距對照 Chrome extension（行高 1.6、內距約 11px/16px）。
-    // Qt 支援 <pre> 上的 line-height 與 padding，實測有生效。
+    // Line height and padding follow the Chrome extension this was compared
+    // against (1.6 line height, roughly 11px/16px padding). Qt does honour
+    // line-height and padding on <pre> — verified by measurement.
     return QStringLiteral("<pre style=\"background-color:%1; color:%2; padding:10px; "
                           "line-height:%4%; font-family:monospace;\">%3</pre>")
         .arg(pal.preBg, pal.preFg, body)

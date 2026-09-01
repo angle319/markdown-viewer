@@ -111,7 +111,8 @@ void MermaidCache::onRendererFinished(bool ok, const QString &error)
     if (ok && QFileInfo(done.outPath).size() > 0) {
         Q_EMIT rendered(done.key, done.outPath);
     } else {
-        // 失敗就別留半截檔案在快取裡，否則下次會被當成命中
+        // Never leave a partial file in the cache; the next request would
+        // mistake it for a hit
         QFile::remove(done.outPath);
         Q_EMIT failed(done.key, error.isEmpty() ? QStringLiteral("渲染失敗") : error);
     }

@@ -6,10 +6,11 @@
 class QFileSystemWatcher;
 class QTimer;
 
-/// 監看單一檔案的變更，帶去彈跳（debounce）。
+/// Watches a single file for changes, with debouncing.
 ///
-/// 處理編輯器的 atomic save：多數編輯器是「寫暫存檔 → rename 覆蓋」，
-/// 原 inode 被換掉後 QFileSystemWatcher 會失去監看，必須重新 addPath。
+/// Handles the atomic save most editors perform (write a temporary file, then
+/// rename over the original): the original inode is replaced, so
+/// QFileSystemWatcher silently stops watching and the path must be re-added.
 class FileWatcher : public QObject
 {
     Q_OBJECT

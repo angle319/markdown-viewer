@@ -47,8 +47,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     m_renderer = new MmdcRenderer(this);
-    // 光柵化倍率跟著螢幕：1x 螢幕上用 2 倍等於白花一倍記憶體
-    // （實測 sample.md 的兩張圖就差約 10MB PSS）。
+    // Rasterisation scale follows the display: rendering at 2x on a 1x screen
+    // wastes memory for no visible gain (measured, about 10 MB of PSS for the
+    // two diagrams in sample.md).
     m_renderer->setPngScale(qMax(1, qCeil(qApp->devicePixelRatio())));
     m_cache = new MermaidCache(m_renderer, this);
 
@@ -119,8 +120,9 @@ void MainWindow::buildUi()
 
     resize(1200, 820);
 
-    // 拖曳開檔。QTextBrowser 與側邊欄的 view 預設會吃掉 drop 事件，
-    // 關掉它們的 acceptDrops 讓事件冒泡到 MainWindow。
+    // Drag and drop to open. QTextBrowser and the sidebar views swallow drop
+    // events by default, so turn their acceptDrops off and let the event bubble
+    // up to MainWindow.
     setAcceptDrops(true);
     m_area->setAcceptDrops(false);
     m_sidebar->setAcceptDrops(false);
@@ -130,8 +132,8 @@ void MainWindow::buildUi()
 
 QString MainWindow::firstUsablePath(const QList<QUrl> &urls)
 {
-    // 先找 markdown 檔，找不到再退而求其次收資料夾 ——
-    // 一次拖多個東西時，開檔比換資料夾更符合預期。
+    // Prefer a markdown file, falling back to a directory. When several items
+    // are dropped at once, opening a document is the more expected outcome.
     QString folder;
     for (const QUrl &u : urls) {
         if (!u.isLocalFile())
@@ -161,7 +163,8 @@ bool MainWindow::openFromUrls(const QList<QUrl> &urls)
         updateStatus(QStringLiteral("拖入的東西不是 markdown 檔或資料夾"));
         return false;
     }
-    onPathSubmitted(path);   // 與路徑列走同一條路徑：檔案就開、資料夾就換根
+    onPathSubmitted(path);   // Same route as the path bar: open a file, re-root
+                             // on a directory
     return true;
 }
 
@@ -204,7 +207,7 @@ void MainWindow::buildMenus()
     connect(actPrev, &QAction::triggered, this, [this] { m_area->previousTab(); });
     addAction(actPrev);
 
-    // Alt+1..9 直接跳分頁（Alt+Shift+1/2 是主題，不衝突）
+    // Alt+1..9 jumps straight to a tab (Alt+Shift+1/2 are the themes, no clash)
     for (int i = 1; i <= 9; ++i) {
         auto *jump = new QAction(this);
         jump->setShortcut(QKeySequence(Qt::ALT | Qt::Key(Qt::Key_0 + i)));
@@ -247,7 +250,7 @@ void MainWindow::buildMenus()
     connect(actToggleTheme, &QAction::triggered, this,
             [this] { setMode(m_mode == Theme::Dark ? Theme::Light : Theme::Dark); });
 
-    // ---- 比較模式 ----
+    // ---- Split panes ----
     viewMenu->addSeparator();
     m_compareGroup = new QActionGroup(this);
     m_compareGroup->setExclusive(true);
@@ -292,9 +295,11 @@ void MainWindow::buildMenus()
     addAction(actMoveLeft);
 
     viewMenu->addSeparator();
-    // QKeySequence::ZoomIn 在 Linux 上解析成 Ctrl++，而 '+' 在一般鍵盤要按
-    // Ctrl+Shift+= —— 所以只綁它的話，使用者按最自然的 Ctrl+= 什麼都不會發生。
-    // 這裡把 Ctrl+= 與數字鍵盤的 +/- 一起綁上。
+    // QKeySequence::ZoomIn resolves to Ctrl++ on Linux, and '+' needs
+    // Ctrl+Shift+= on most keyboards — so binding only that leaves the natural
+    // Ctrl+= doing nothing. Bind Ctrl+= and the keypad +/- as well.
+    //
+    // 中：只綁 QKeySequence::ZoomIn 的話，按 Ctrl+= 不會有反應。
     auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
     actZoomIn->setShortcuts({ QKeySequence::ZoomIn,
                               QKeySequence(Qt::CTRL | Qt::Key_Equal),
@@ -389,9 +394,10 @@ void MainWindow::onReloadTriggered()
 
 void MainWindow::setMode(Theme::Mode mode)
 {
-    // m_themeApplied 這個旗標的意義：啟動時就算 mode 沒變也要套一次 palette，
-    // 否則整個 app 會沿用系統（GTK）主題的底色，跟文件內容的主題對不起來 ——
-    // 實際踩過：視窗是深藍灰色，既不是白色主題也不是黑色主題。
+    // What m_themeApplied is for: at startup the palette must be applied once
+    // even when the mode has not changed. Otherwise the whole application keeps
+    // the system (GTK) palette, which does not match the document colours —
+    // observed as a slate-blue window that was neither theme.
     if (m_mode == mode && m_themeApplied)
         return;
 
@@ -400,8 +406,9 @@ void MainWindow::setMode(Theme::Mode mode)
     (mode == Theme::Dark ? m_actBlack : m_actWhite)->setChecked(true);
     m_area->setTheme(mode);
 
-    // 套到整個 application：選單列、分頁標籤、對話框都要跟著換，
-    // 只設在 MainWindow 上的話 QMenuBar 之類的仍會用預設淺色系。
+    // Apply to the whole application: the menu bar, tab labels and dialogs must
+    // follow. Setting it only on MainWindow leaves QMenuBar and friends on the
+    // default light palette.
     const QPalette pal = Theme::palette(m_mode);
     qApp->setPalette(pal);
     setPalette(pal);
@@ -429,7 +436,7 @@ void MainWindow::onPathSubmitted(const QString &path)
 
     if (fi.isDir()) {
         m_sidebar->files()->setRoot(fi.absoluteFilePath());
-        m_sidebar->setCurrentIndex(1);          // 切到「檔案」分頁
+        m_sidebar->setCurrentIndex(1);          // Switch to the Files tab
         if (!m_actSidebar->isChecked())
             m_actSidebar->setChecked(true);
         updateStatus(QStringLiteral("已切換資料夾: ") + fi.absoluteFilePath());
@@ -455,7 +462,7 @@ void MainWindow::onLinkActivated(const QUrl &url)
     DocumentView *view = activeView();
     const QString basePath = view ? view->path() : QString();
 
-    // 純錨點
+    // A bare anchor
     if (!url.fragment().isEmpty() && url.path().isEmpty()) {
         if (view)
             view->scrollToAnchor(url.fragment());
@@ -468,9 +475,11 @@ void MainWindow::onLinkActivated(const QUrl &url)
         return;
     }
 
-    // 連結導航**在同一個分頁內**換檔，不開新分頁：像 INDEX.md 那種有幾十個
-    // 連結的索引頁，每點一次就新增一個分頁的話很快就爆掉。
-    // 要另開分頁請用路徑列、檔案樹或拖曳。
+    // Link navigation replaces the content of the *same* tab rather than opening
+    // a new one: an index page with dozens of links would otherwise spawn dozens
+    // of tabs. New tabs come from the path bar, the file tree or drag and drop.
+    //
+    // 中：連結一律在原分頁換檔，否則索引頁點幾下就爆出一堆分頁。
     const auto navigateInPlace = [this, view](const QString &local) {
         if (!view) {
             openFile(local);
@@ -483,7 +492,7 @@ void MainWindow::onLinkActivated(const QUrl &url)
         }
     };
 
-    // 相對路徑：對目前檔案所在目錄解析
+    // Relative path: resolve against the current document's directory
     if (url.isRelative() && !basePath.isEmpty()) {
         const QString local =
             QDir(QFileInfo(basePath).absolutePath()).absoluteFilePath(url.path());
@@ -528,8 +537,9 @@ void MainWindow::updateStatus(const QString &transient)
             parts << QStringLiteral("mermaid %1 張").arg(view->document().mermaid.size());
     }
 
-    // 佇列是全域的（所有分頁共用一個 MermaidCache），所以不能拿它跟
-    // 當前文件的圖表數相除 —— 三個分頁一起排隊時會顯示出「3/2」這種數字。
+    // The queue is global (every tab shares one MermaidCache), so it cannot be
+    // shown as a fraction of the current document's diagram count — three tabs
+    // queued at once produced nonsense like "3/2".
     if (const int pending = m_cache->pendingCount(); pending > 0) {
         parts << QStringLiteral("產生中 %1 張").arg(pending);
     }
@@ -542,7 +552,7 @@ void MainWindow::loadSettings()
     restoreGeometry(s.value(QStringLiteral("window/geometry")).toByteArray());
     restoreState(s.value(QStringLiteral("window/state")).toByteArray());
 
-    // 預設黑色主題
+    // Black theme by default
     const bool dark = s.value(QStringLiteral("view/dark"), true).toBool();
     setMode(dark ? Theme::Dark : Theme::Light);
 
@@ -586,7 +596,7 @@ void MainWindow::saveSettings()
     s.setValue(QStringLiteral("window/splitter"), sizes);
     s.setValue(QStringLiteral("files/root"), m_sidebar->files()->root());
 
-    // 分頁清單與作用中索引，下次啟動還原
+    // Open tabs and the active index, restored on the next start
     s.setValue(QStringLiteral("files/openTabs"), m_area->openPaths());
     s.setValue(QStringLiteral("files/activeTab"), m_area->activeIndex());
     DocumentView *view = activeView();

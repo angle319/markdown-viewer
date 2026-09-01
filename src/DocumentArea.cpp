@@ -33,7 +33,7 @@ DocumentArea::DocumentArea(MermaidCache *cache, QWidget *parent)
     updatePlaceholder();
 }
 
-// ------------------------------------------------------------------- 面板
+// ------------------------------------------------------------------- Panes
 
 int DocumentArea::paneCount() const
 {
@@ -126,15 +126,18 @@ void DocumentArea::refreshLayout()
 {
     const int panes = paneCount();
     if (panes > 1) {
-        // QSplitter 對新插入的 widget 只給 sizeHint 那麼寬，原本那格會霸住幾乎
-        // 全部空間 —— 實際踩過：拖曳新建的面板只剩一百多 px，內容逐字換行。
+        // QSplitter gives a newly inserted widget only its size hint, leaving the
+        // existing pane with almost all the space. Measured: a drag-created pane
+        // came out around 150 px wide, narrow enough to wrap content one
+        // character per line.
         const int total = qMax(m_splitter->width(), panes * 240);
         m_splitter->setSizes(QList<int>(panes, total / panes));
     }
     m_splitter->updateGeometry();
 
-    // 拖放結束後 X11 不一定會送重繪事件，殘影會留在畫面上（內容看起來蓋到
-    // 分頁列）。這裡明確要求整區重畫。
+    // X11 does not reliably deliver expose events after a drop, which leaves the
+    // previous frame visible (content appears to overlap the tab bar). Ask for a
+    // full repaint explicitly.
     for (int i = 0; i < panes; ++i)
         if (PaneGroup *p = paneAt(i))
             p->update();
@@ -159,11 +162,12 @@ PaneGroup *DocumentArea::paneOf(DocumentView *view) const
 
 void DocumentArea::setPaneCount(int panes)
 {
-    // 不做出空面板：面板數不會超過文件數
+    // Never create an empty pane: the count cannot exceed the document count
     const int wanted = qBound(1, qMin(panes, MaxPanes), qMax(1, count()));
 
     while (paneCount() < wanted) {
-        // 從分頁最多的那一格勻一份出來，優先勻走「目前分頁的下一個」
+        // Take one from whichever pane has the most tabs, preferring the tab
+        // after its current one
         PaneGroup *donor = nullptr;
         for (int i = 0; i < m_splitter->count(); ++i)
             if (PaneGroup *p = paneAt(i); p && (!donor || p->count() > donor->count()))
@@ -225,7 +229,7 @@ void DocumentArea::moveActiveTabToPane(int delta)
     else if (paneCount() < MaxPanes)
         dest = createPane(delta > 0 ? -1 : 0);
     else
-        dest = src;   // 已達上限，放回原處
+        dest = src;   // At the pane limit; put it back
 
     view->setParent(nullptr);
     dest->setCurrentIndex(dest->addView(view));
@@ -251,10 +255,10 @@ void DocumentArea::moveTabToPane(PaneGroup *src, int index, PaneGroup *target,
     if (!src || !target || index < 0)
         return;
 
-    // 放回自己身上的中間 = 什麼都不做
+    // Dropping into the middle of its own pane is a no-op
     if (zone == PaneGroup::DropZone::Into && src == target)
         return;
-    // 這一格只有一個分頁，又要在它旁邊分割 = 等於沒變
+    // Splitting beside a pane that holds only this tab changes nothing
     if (zone != PaneGroup::DropZone::Into && src == target && src->count() < 2)
         return;
 
@@ -265,7 +269,7 @@ void DocumentArea::moveTabToPane(PaneGroup *src, int index, PaneGroup *target,
     PaneGroup *dest = target;
     if (zone != PaneGroup::DropZone::Into) {
         if (paneCount() >= MaxPanes) {
-            dest = target;   // 已達面板上限，就併進目標格
+            dest = target;   // At the pane limit; merge into the target instead
         } else {
             const int at = m_splitter->indexOf(target)
                            + (zone == PaneGroup::DropZone::SplitRight ? 1 : 0);
@@ -283,7 +287,7 @@ void DocumentArea::moveTabToPane(PaneGroup *src, int index, PaneGroup *target,
     Q_EMIT activeViewChanged();
 }
 
-// --------------------------------------------------------------- 全域索引
+// -------------------------------------------------------- Global indexing
 
 int DocumentArea::count() const
 {
@@ -397,7 +401,7 @@ QList<DocumentView *> DocumentArea::visibleViews() const
     return out;
 }
 
-// ------------------------------------------------------------------- 開檔
+// ----------------------------------------------------------------- Opening
 
 DocumentView *DocumentArea::createView()
 {
@@ -437,7 +441,7 @@ DocumentView *DocumentArea::openFile(const QString &path)
 {
     const QString abs = QFileInfo(path).absoluteFilePath();
 
-    // 已經開過就切過去，不論它在哪一格
+    // Already open somewhere: switch to it, whichever pane holds it
     for (int i = 0; i < m_splitter->count(); ++i) {
         PaneGroup *pane = paneAt(i);
         if (!pane)
@@ -456,8 +460,11 @@ DocumentView *DocumentArea::openFile(const QString &path)
 
     DocumentView *view = createView();
 
-    // 先掛上分頁並讓它可見，**再**載入文件：隱藏的 widget 不會排版，
-    // QTextDocument 的 loadResource 就不會被呼叫，圖片尺寸會全部變成 0。
+    // Add the tab and make it visible *before* loading: a hidden widget never
+    // lays out, so QTextDocument::loadResource is never called and every image
+    // ends up sized 0.
+    //
+    // 中：隱藏的 widget 不會排版，圖片尺寸會全變 0。
     const int index = m_activeGroup->addView(view);
     m_activeGroup->setCurrentIndex(index);
     updatePlaceholder();
@@ -474,7 +481,7 @@ DocumentView *DocumentArea::openFile(const QString &path)
     return view;
 }
 
-// ----------------------------------------------------------- 全域操作
+// ------------------------------------------------------ Whole-area actions
 
 void DocumentArea::closeOtherTabs(PaneGroup *pane, int keepIndex)
 {
@@ -592,7 +599,7 @@ void DocumentArea::setTheme(Theme::Mode mode)
 
 void DocumentArea::zoomIn()
 {
-    // 縮放套用到全部分頁，分割時各格字級才會一致
+    // Zoom applies to every tab so that split panes stay at the same size
     for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->zoomIn();

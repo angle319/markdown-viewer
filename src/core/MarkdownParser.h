@@ -2,26 +2,29 @@
 
 #include "core/Document.h"
 
-/// 解析選項。
+/// Parse options.
 ///
-/// 刻意定義在 MarkdownParser 之外：巢狀類別的 default member initializer
-/// 在同一個 class 內被當作預設引數使用時是 ill-formed（GCC 會直接拒絕）。
+/// Deliberately declared outside MarkdownParser: a nested class's default
+/// member initialisers are ill-formed when used as a default argument inside
+/// the enclosing class, and GCC rejects it outright.
 struct MarkdownOptions {
-    bool mermaidEnabled = true;  ///< false 時 mermaid 區塊當普通程式碼顯示
-    bool darkTheme = false;      ///< 影響語法高亮配色
+    bool mermaidEnabled = true;  ///< When false, mermaid fences render as ordinary code
+    bool darkTheme = false;      ///< Selects the syntax-highlighting palette
 };
 
-/// md4c → Qt rich-text 子集 HTML。
+/// md4c to HTML, restricted to Qt's rich-text subset.
 ///
-/// 刻意不使用 md4c 內建的 md_html()，而是自己實作 MD_PARSER callback，
-/// 因為需要在同一趟解析中攔截 mermaid fence、產生 heading anchor、
-/// 注入語法高亮，並改寫圖片相對路徑。事後用 regex 刮 HTML 太脆弱。
+/// This deliberately implements its own MD_PARSER callbacks rather than calling
+/// md4c's bundled md_html(): mermaid interception, heading anchors, syntax
+/// highlighting and image path rewriting all have to happen in the same pass.
+/// Post-processing an HTML string with regular expressions is too fragile.
 class MarkdownParser
 {
 public:
     using Options = MarkdownOptions;
 
-    /// @param baseDir 圖片相對路徑的解析基準；空字串則原樣保留相對路徑
+    /// @param baseDir Base for resolving relative image paths; when empty,
+    ///                relative paths are left untouched
     static Document parse(const QString &markdown,
                           const QString &baseDir = QString(),
                           const Options &opt = Options());

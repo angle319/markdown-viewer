@@ -12,11 +12,12 @@ namespace {
 
 constexpr int kRenderTimeoutMs = 30000;
 
-/// mermaid 設定：htmlLabels 必須關掉，否則 Qt 畫不出文字。
+/// Mermaid config: htmlLabels must be off or Qt cannot draw the labels.
 const char *kMermaidConfig =
     R"({"htmlLabels":false,"flowchart":{"htmlLabels":false},"class":{"htmlLabels":false}})";
 
-/// puppeteer 設定：容器 / 受限環境下 sandbox 會直接失敗。
+/// Puppeteer config: the sandbox fails outright in containers and restricted
+/// environments.
 const char *kPuppeteerConfig =
     R"({"args":["--no-sandbox","--disable-dev-shm-usage"]})";
 
@@ -28,8 +29,8 @@ bool writeTextFile(const QString &path, const QByteArray &data)
     return f.write(data) == data.size();
 }
 
-/// mmdc 產出的 SVG 根元素帶 width="100%"，交給 QSvgRenderer 會失去固有尺寸。
-/// 移除它，讓 viewBox 決定大小。
+/// mmdc's SVG root carries width="100%", which robs QSvgRenderer of an
+/// intrinsic size. Strip it so the viewBox decides.
 void stripPercentageWidth(const QString &svgPath)
 {
     QFile f(svgPath);
@@ -64,9 +65,9 @@ MmdcRenderer::MmdcRenderer(QObject *parent)
 
 MmdcRenderer::~MmdcRenderer()
 {
-    // 關閉時若還有渲染在跑，QProcess 被連帶解構會發出
-    // "Destroyed while process is still running" 並可能留下孤兒行程。
-    // 明確終止並等它收屍。
+    // If a render is still running at shutdown, destroying the QProcess emits
+    // "Destroyed while process is still running" and may orphan the child.
+    // Terminate it explicitly and reap it.
     if (m_proc && m_proc->state() != QProcess::NotRunning) {
         m_proc->disconnect(this);
         m_proc->kill();
@@ -76,7 +77,7 @@ MmdcRenderer::~MmdcRenderer()
 
 QString MmdcRenderer::findMmdc()
 {
-    // 明確覆寫優先
+    // An explicit override wins
     const QString override =
         QProcessEnvironment::systemEnvironment().value(QStringLiteral("MARKDOWN_TOOL_MMDC"));
     if (!override.isEmpty() && QFileInfo(override).isExecutable())
@@ -86,7 +87,7 @@ QString MmdcRenderer::findMmdc()
     if (!onPath.isEmpty())
         return onPath;
 
-    // 從桌面啟動器啟動時 PATH 通常不含 nvm，手動找一輪
+    // A desktop launcher's PATH usually lacks nvm, so search for it
     const QString nvmRoot = QDir::homePath() + QStringLiteral("/.nvm/versions/node");
     const QFileInfoList versions =
         QDir(nvmRoot).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
@@ -126,8 +127,9 @@ QString MmdcRenderer::rendererId() const
         }
     }
 
-    // 倍率必須進 id（進而進快取 key）：不同倍率的產出像素不同，
-    // 共用同一個快取檔會讓換螢幕後拿到錯誤解析度的圖。
+    // The scale must be part of the id, and therefore of the cache key: output
+    // pixels differ per scale, so sharing one cache file would hand back an
+    // image at the wrong resolution after moving to another display.
     if (m_outputExtension == QStringLiteral("png"))
         return QStringLiteral("%1@%2x").arg(m_versionCache).arg(m_pngScale);
     return m_versionCache;

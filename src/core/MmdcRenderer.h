@@ -7,20 +7,26 @@
 class QProcess;
 class QTemporaryDir;
 
-/// 用外部的 mermaid-cli（mmdc）算圖。
+/// Renders diagrams with the external mermaid-cli (mmdc).
 ///
-/// 實測（2026-08-31, mmdc 11.16.0）必須帶的兩個設定：
+/// Two settings are required, established by measurement (2026-08-31, mmdc
+/// 11.16.0):
 ///   * puppeteer: --no-sandbox --disable-dev-shm-usage
 ///   * mermaid:   htmlLabels:false
 ///
-/// htmlLabels 是關鍵：mermaid 預設把節點文字放進 <foreignObject> 裡的 HTML，
-/// 而 Qt 的 QSvgRenderer 只支援 SVG Tiny 1.2、不認 foreignObject，
-/// 結果是圖形畫得出來但**所有文字都是空白**。關掉後會產出真正的 <text> 元素。
+/// htmlLabels is the critical one: by default mermaid puts node text inside a
+/// <foreignObject>, which Qt's QSvgRenderer (SVG Tiny 1.2) does not support at
+/// all, so the shapes render but every label is blank. Disabling it emits real
+/// <text> elements.
 ///
-/// **預設輸出是 PNG，不是 SVG。** 即使關掉 htmlLabels，Qt SVG Tiny 仍然
-/// 不支援 <marker>，實測結果是所有連線與箭頭整批消失、節點文字被畫到方框
-/// 上緣、邊標籤出現灰色方塊、原點還留一個黑色三角形。改由 mmdc（Chromium）
-/// 自己光柵化成 PNG 就完全正確。SVG 模式保留為可切換，但已知與 Qt 不相容。
+/// **The default output is PNG, not SVG.** Even with htmlLabels off, SVG Tiny
+/// has no <marker>: every connector and arrowhead disappears, node labels land
+/// at the top edge of their boxes, grey blocks appear beside edge labels, and a
+/// stray black triangle is left at the origin. Letting mmdc (Chromium)
+/// rasterise to PNG is correct. SVG remains selectable but is known to be
+/// incompatible with Qt.
+///
+/// 中：SVG 經 Qt 會掉光連線與箭頭，所以預設輸出 PNG。
 class MmdcRenderer : public IMermaidRenderer
 {
     Q_OBJECT
@@ -36,14 +42,16 @@ public:
 
     qreal outputScale() const override;
 
-    /// "png"（預設，正確）或 "svg"（解析度無關，但 Qt 畫不對，見類別註解）。
+    /// "png" (default, correct) or "svg" (resolution independent, but Qt draws
+    /// it wrong — see the class comment).
     void setOutputExtension(const QString &ext) { m_outputExtension = ext; }
 
-    /// PNG 的光柵化倍率，預設 2（HiDPI 下不糊）。
+    /// PNG rasterisation scale; follows the display so HiDPI stays sharp.
     void setPngScale(int s) { m_pngScale = qMax(1, s); }
 
-    /// 找不到 mmdc 時回傳空字串。會找 PATH，也會找 nvm 的安裝位置
-    /// （從桌面啟動器啟動時 PATH 通常不含 ~/.nvm/...）。
+    /// Returns an empty string when mmdc cannot be found. Searches PATH and the
+    /// nvm install locations, because a desktop launcher's PATH usually does not
+    /// include ~/.nvm/...
     static QString findMmdc();
 
 private:

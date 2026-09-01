@@ -32,7 +32,7 @@ void TestCodeHighlighter::escapesHtml()
     QVERIFY2(out.contains(QStringLiteral("&lt;")), qPrintable(out));
     QVERIFY(out.contains(QStringLiteral("&gt;")));
     QVERIFY(out.contains(QStringLiteral("&amp;")));
-    // 不能留下未轉義的 tag
+    // No unescaped tag may survive
     QVERIFY(!out.contains(QStringLiteral("<b>")));
 }
 
@@ -78,7 +78,7 @@ void TestCodeHighlighter::lineCommentIsColored()
 
 void TestCodeHighlighter::unterminatedStringDoesNotSwallowRest()
 {
-    // 少一個引號時不能把後面整份程式碼都吃成字串
+    // A missing quote must not swallow the rest of the file as string content
     const QString out = CodeHighlighter::highlight(
         QStringLiteral("a = \"oops\nreturn 1;\n"), QStringLiteral("cpp"));
 

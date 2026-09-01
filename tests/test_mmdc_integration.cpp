@@ -10,13 +10,15 @@
 #include "core/MermaidCache.h"
 #include "core/MmdcRenderer.h"
 
-/// 會真的執行外部 mmdc 的整合測試。mmdc 不在就整支 skip，不當失敗。
+/// Integration test that really runs the external mmdc. When mmdc is missing
+/// the whole suite skips rather than failing.
 ///
-/// 這支測試的核心任務是把「為什麼預設輸出是 PNG 而不是 SVG」釘成可執行的證據。
-/// 規劃階段留下的風險是「Qt 的 QSvgRenderer 只支援 SVG Tiny 1.2」，實測結論是
-/// 它撐不住 mermaid：即使關掉 htmlLabels 讓文字變成真正的 <text>，Qt 仍然不支援
-/// <marker>，結果是**所有連線與箭頭整批消失**。
-/// svgOutputLosesEdgesInQt() 就是在盯住這件事，別讓人日後「順手」改回 SVG。
+/// Its main job is to turn "why the default output is PNG and not SVG" into
+/// executable evidence. The risk left open at design time was that Qt's
+/// QSvgRenderer only implements SVG Tiny 1.2; measurement settled it — Tiny
+/// cannot carry mermaid. Even with htmlLabels off so labels become real <text>,
+/// Qt still has no <marker>, and **every connector and arrowhead disappears**.
+/// svgOutputLosesEdgesInQt() guards that, so nobody casually switches back.
 class TestMmdcIntegration : public QObject
 {
     Q_OBJECT
@@ -38,9 +40,10 @@ private:
     QString renderSync(MermaidCache *cache, const QString &source, bool dark,
                        int timeoutMs = 60000);
 
-    /// 影像正中央水平帶的深色墨水量。
-    /// 對 `A[...] --> B[...]` 這種左右佈局，中央帶就是連線與箭頭所在之處：
-    /// 兩個節點方框分別落在左右兩側，中間的空隙只可能被連線佔用。
+    /// Dark ink in the image's central horizontal band.
+    /// For a left-to-right `A[...] --> B[...]` layout that band is exactly where
+    /// the connector and arrowhead live: the two node boxes sit left and right,
+    /// so only a connector can occupy the gap between them.
     static qint64 inkInCenterBand(const QImage &img);
     static QImage loadAsImage(const QString &path);
     static qint64 totalInk(const QImage &img);
@@ -49,7 +52,8 @@ private:
     QScopedPointer<MmdcRenderer> m_renderer;
     QScopedPointer<MermaidCache> m_cache;
 
-    /// 左右佈局、節點文字夠長，確保中央有明顯的連線區段
+    /// Left-to-right layout with labels long enough to leave a clear connector
+    /// segment in the middle
     static QString twoNodeDiagram()
     {
         return QStringLiteral("flowchart LR\n  A[AAAAAAAA] --> B[BBBBBBBB]\n");
@@ -198,9 +202,10 @@ void TestMmdcIntegration::pngDrawsEdgesBetweenNodes()
 
 void TestMmdcIntegration::svgOutputLosesEdgesInQt()
 {
-    // 這支測試刻意記錄一個已知缺陷：Qt SVG Tiny 不支援 <marker>，
-    // 導致 mermaid 的連線與箭頭在 Qt 裡整批消失。
-    // 若哪天 Qt 修好了，這支會失敗 —— 那正是重新考慮 SVG 的時機。
+    // This test deliberately records a known defect: Qt's SVG Tiny has no
+    // <marker>, so mermaid's connectors and arrowheads all vanish under Qt.
+    // If a future Qt fixes that, this test fails — which is exactly when SVG
+    // is worth reconsidering.
     MmdcRenderer svgRenderer;
     svgRenderer.setOutputExtension(QStringLiteral("svg"));
     MermaidCache svgCache(&svgRenderer);
@@ -223,14 +228,14 @@ void TestMmdcIntegration::svgOutputLosesEdgesInQt()
              qPrintable(QStringLiteral("SVG 竟然畫出了連線（svg=%1 png=%2）—— "
                                        "Qt 可能已支援 marker，可重新評估 SVG 模式")
                             .arg(svgBand).arg(pngBand)));
-    // 圖形本身（方框、文字）還是有畫出來的，缺的是連線
+    // The shapes and labels do render; it is the connectors that are missing
     QVERIFY2(totalInk(viaQt) > 0, "SVG 完全空白，與預期的『只缺連線』不符");
 }
 
 void TestMmdcIntegration::svgOutputHasNoForeignObject()
 {
-    // htmlLabels:false 的效果驗證：沒有 foreignObject，文字是真正的 <text>。
-    // 這是 SVG 模式的必要（但不充分）條件。
+    // Verifies what htmlLabels:false buys: no foreignObject, and labels as real
+    // <text>. That is necessary for SVG mode, though not sufficient.
     MmdcRenderer svgRenderer;
     svgRenderer.setOutputExtension(QStringLiteral("svg"));
     MermaidCache svgCache(&svgRenderer);
@@ -253,8 +258,9 @@ void TestMmdcIntegration::svgOutputHasNoForeignObject()
 
 void TestMmdcIntegration::cjkLabelsProduceInkInPng()
 {
-    // 差分法：同結構的圖，一次帶中文標籤、一次標籤留空。
-    // 帶文字的單位面積墨水必須明顯較多，才算文字真的被畫出來。
+    // Differential method: the same diagram twice, once with CJK labels and once
+    // with them blank. Ink per unit area must be clearly higher with labels for
+    // the text to count as actually drawn.
     const QString withText = QStringLiteral("flowchart LR\n  A[讀取檔案內容] --> B[顯示結果畫面]\n");
     const QString blank = QStringLiteral("flowchart LR\n  A[ ] --> B[ ]\n");
 

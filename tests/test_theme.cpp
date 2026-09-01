@@ -4,11 +4,12 @@
 #include "Theme.h"
 #include "core/CodeHighlighter.h"
 
-/// 主題對比保證。
+/// Theme contrast guarantees.
 ///
-/// 需求是「content 必須是對比色，不要有看不見的狀況」，所以這裡不靠眼睛，
-/// 而是用 WCAG 2.1 相對亮度把每一組顏色的對比比算出來釘住門檻。
-/// 任何人改配色而打破門檻，這支測試就會失敗。
+/// The requirement was "content must contrast; nothing may be invisible", so
+/// this does not rely on eyes: every colour pair is expressed as a WCAG 2.1
+/// contrast ratio and pinned to a threshold. Changing a colour that breaks one
+/// fails this test.
 class TestTheme : public QObject
 {
     Q_OBJECT
@@ -44,7 +45,7 @@ void TestTheme::relativeLuminanceHasKnownEndpoints()
 {
     QVERIFY(qFuzzyIsNull(Theme::relativeLuminance(Qt::black)));
     QVERIFY(qAbs(Theme::relativeLuminance(Qt::white) - 1.0) < 1e-9);
-    // 中灰應落在兩者之間
+    // Mid grey should land between the two
     const double mid = Theme::relativeLuminance(QColor(128, 128, 128));
     QVERIFY(mid > 0.15 && mid < 0.25);
 }
@@ -99,7 +100,7 @@ void TestTheme::mutedAndLinkMeetAa()
 
 void TestTheme::borderMeetsNonTextThreshold()
 {
-    // 框線是非文字元素，WCAG 門檻是 3:1
+    // Borders are non-text elements, so the WCAG threshold is 3:1
     for (Theme::Mode m : modes()) {
         const Theme::Colors &c = Theme::colors(m);
         const double r = Theme::contrastRatio(QColor(c.border), QColor(c.background));
@@ -128,7 +129,7 @@ void TestTheme::codeAndTableBackgroundsKeepTextReadable()
 
 void TestTheme::codeBackgroundIsDistinguishableFromPage()
 {
-    // 程式碼區塊要看得出是一塊，但不能反過來搶對比
+    // A code block should read as a block without stealing contrast itself
     for (Theme::Mode m : modes()) {
         const Theme::Colors &c = Theme::colors(m);
         const double r = Theme::contrastRatio(QColor(c.codeBackground), QColor(c.background));
@@ -140,9 +141,10 @@ void TestTheme::codeBackgroundIsDistinguishableFromPage()
 
 void TestTheme::syntaxColoursAreReadable()
 {
-    // 黑箱做法：真的產出高亮 HTML，把裡面每一個 color 抽出來，
-    // 對著同一段 HTML 宣告的 <pre> 背景色算對比。
-    // 這樣連日後新增語言都會自動被檢查，不需要另外開 API。
+    // Black-box approach: actually produce highlighted HTML, pull every colour
+    // out of it, and measure against the <pre> background declared in the same
+    // output. Languages added later are then checked automatically, with no
+    // extra API to maintain.
     const QStringList langs{
         QStringLiteral("cpp"),  QStringLiteral("c"),    QStringLiteral("python"),
         QStringLiteral("js"),   QStringLiteral("ts"),   QStringLiteral("json"),
@@ -195,11 +197,14 @@ void TestTheme::syntaxColoursAreReadable()
 
 void TestTheme::styleSheetHasNoLeftoverPlaceholders()
 {
-    // 這支測試盯的是一個真的踩過的坑：QString::arg 的多引數版本按「出現的
-    // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
-    // 就會讓其後全部錯位（當時害 code 的底色拿到了前景色，而且因為對比修正
-    // 把前景改成可讀色，寬鬆的斷言還讓它過關）。現在改用具名 token，
-    // 這裡確認取代乾淨、也確認沒人改回位置引數。
+    // This guards a trap that was actually hit: QString::arg's multi-argument
+    // overload substitutes the lowest-numbered markers *present*, in order — it
+    // does not map %N to the Nth argument. Skipping one number shifts everything
+    // after it. At the time that left inline code's background holding the
+    // foreground colour, and a loose assertion still passed because the contrast
+    // fixup replaced the foreground with something readable. Named tokens are
+    // used now; this checks the substitution is clean and that nobody went back
+    // to positional arguments.
     for (Theme::Mode m : modes()) {
         const QString css = Theme::documentStyleSheet(m);
         QVERIFY2(!css.contains(QLatin1Char('@')),
@@ -207,7 +212,7 @@ void TestTheme::styleSheetHasNoLeftoverPlaceholders()
         QVERIFY2(!css.contains(QRegularExpression(QStringLiteral("%\\d"))),
                  qPrintable(QStringLiteral("stylesheet 有未取代的位置引數: %1").arg(css)));
 
-        // 每一個顏色都應該真的出現在 CSS 裡
+        // Every colour should actually appear in the CSS
         const Theme::Colors &c = Theme::colors(m);
         for (const QString &colour : { c.background, c.text, c.muted, c.link,
                                        c.codeInline, c.codeInlineBackground,
@@ -230,17 +235,20 @@ void TestTheme::inlineCodeColoursAreReadableAndDistinct()
         QVERIFY2(r >= Theme::MinTextContrast,
                  qPrintable(QStringLiteral("%1 行內 code 對比 %2:1").arg(Theme::name(m)).arg(r)));
 
-        // 底色要看得出是一塊「chip」，但不能搶對比
+        // The background should read as a chip without stealing contrast
         const double chip = Theme::contrastRatio(bg, pageBg);
         QVERIFY2(chip > 1.05 && chip < 2.0,
                  qPrintable(QStringLiteral("%1 行內 code 底色與頁面對比 %2:1 不合理")
                                 .arg(Theme::name(m)).arg(chip)));
 
-        // 與連結色要分得出來，否則讀者無法區分「程式碼」與「可點的連結」。
+        // It must be distinguishable from the link colour, or the reader cannot
+        // tell code from a clickable link.
         //
-        // 判準用**色相差**而不是 WCAG 對比比：對比比只衡量亮度，紫 (#6f42c1) 與
-        // 藍 (#0b57d0) 的對比比只有 1.13:1，卻是明顯不同的顏色。用對比比當判準
-        // 會逼人去改亮度而不是改色相，方向就錯了。
+        // The metric is **hue difference**, not WCAG contrast: contrast measures
+        // luminance only, so purple (#6f42c1) and blue (#0b57d0) score 1.13:1
+        // despite being obviously different. Using contrast here would push the
+        // fix toward changing lightness rather than hue, which is the wrong
+        // direction.
         const auto hueDelta = [](const QColor &a, const QColor &b) {
             const int ha = a.hue();
             const int hb = b.hue();
@@ -254,16 +262,18 @@ void TestTheme::inlineCodeColoursAreReadableAndDistinct()
                  qPrintable(QStringLiteral("%1 行內 code 與連結的色相只差 %2°（需 ≥60）: %3 vs %4")
                                 .arg(Theme::name(m)).arg(dHue).arg(fg.name(), link.name())));
 
-        // 也要與正文色不同，否則等於沒標注
+        // It must also differ from body text, or nothing is marked at all
         QVERIFY(fg != QColor(c.text));
     }
 }
 
 void TestTheme::tabBarStatesAreClearlyDistinct()
 {
-    // 使用者回報「tab 反色不夠，不知道 focus 在哪」。
-    // QTabBar 預設的選取狀態只差一點點底色，所以改用 QSS 明確拉開：
-    // 選取中 = 頁面底色 + 正文色 + 粗體 + 頂端強調線；未選取 = 沉一階 + 次要色。
+    // Reported by a user: "the tab highlight is too weak, I cannot tell where
+    // focus is". QTabBar's default selected state differs by only a slight
+    // background shade, so a stylesheet separates them explicitly:
+    // selected = page background + body text + bold + top accent line;
+    // unselected = one step back + secondary text.
     for (Theme::Mode m : modes()) {
         const Theme::Colors &c = Theme::colors(m);
 
@@ -276,24 +286,24 @@ void TestTheme::tabBarStatesAreClearlyDistinct()
                  qPrintable(QStringLiteral("%1 未選取分頁的文字對比只有 %2:1")
                                 .arg(Theme::name(m)).arg(unselected)));
 
-        // 兩種狀態的底色必須分得出來，否則就是「不知道 focus 在哪」
+        // The two backgrounds must be tellable apart, or focus is invisible
         const double states = Theme::contrastRatio(QColor(c.background), QColor(c.tabInactive));
         QVERIFY2(states >= 1.2,
                  qPrintable(QStringLiteral("%1 選取／未選取的底色只差 %2，分不出來")
                                 .arg(Theme::name(m)).arg(states)));
 
-        // 選取中的文字要比未選取的更顯眼
+        // Selected text must be more prominent than unselected
         QVERIFY2(selected > unselected,
                  qPrintable(QStringLiteral("%1 選取中的文字沒有比未選取的更顯眼")
                                 .arg(Theme::name(m))));
 
-        // 強調線要看得見
+        // The accent line must be visible
         const double accent = Theme::contrastRatio(QColor(c.link), QColor(c.background));
         QVERIFY2(accent >= Theme::MinNonTextContrast,
                  qPrintable(QStringLiteral("%1 分頁強調線看不清楚: %2:1")
                                 .arg(Theme::name(m)).arg(accent)));
 
-        // QSS 要把 token 都換掉
+        // The stylesheet must have every token substituted
         const QString qss = Theme::tabBarStyleSheet(m);
         QVERIFY2(!qss.contains(QLatin1Char('@')), qPrintable(qss));
         QVERIFY(qss.contains(c.tabInactive));
@@ -303,9 +313,10 @@ void TestTheme::tabBarStatesAreClearlyDistinct()
 
 void TestTheme::paletteRolePairsAreReadable()
 {
-    // widget chrome 也算「content 不能看不見」的一部分：
-    // 只設 Window/Base/Text 時，QTabBar 與 QMenuBar 會用預設的
-    // Button/ButtonText 去畫，黑色主題下就是隱形的分頁標籤與選單。
+    // Widget chrome counts as content that must not be invisible: with only
+    // Window/Base/Text set, QTabBar and QMenuBar paint with the default
+    // Button/ButtonText, which on the black theme means invisible tab labels
+    // and an invisible menu bar.
     struct Pair {
         const char *name;
         QPalette::ColorRole fg;
@@ -335,7 +346,7 @@ void TestTheme::paletteRolePairsAreReadable()
                                     .arg(p.color(pr.fg).name(), p.color(pr.bg).name())));
         }
 
-        // 停用狀態也要看得見
+        // The disabled state must stay visible too
         const double dis = Theme::contrastRatio(
             p.color(QPalette::Disabled, QPalette::WindowText),
             p.color(QPalette::Disabled, QPalette::Window));
@@ -346,8 +357,8 @@ void TestTheme::paletteRolePairsAreReadable()
 
 void TestTheme::paletteHasNoDefaultLightRolesInBlackTheme()
 {
-    // 直接盯住「忘記設某個 role」這個 bug：黑色主題下每一個背景類 role
-    // 都必須是深色，否則就是預設的淺色系漏進來了。
+    // Guards the "forgot to set a role" bug directly: on the black theme every
+    // background role must be dark, otherwise a default light one leaked in.
     const QPalette p = Theme::palette(Theme::Dark);
     for (QPalette::ColorRole role : { QPalette::Window, QPalette::Base, QPalette::AlternateBase,
                                       QPalette::Button, QPalette::ToolTipBase }) {
@@ -365,8 +376,9 @@ void TestTheme::paletteHasNoDefaultLightRolesInBlackTheme()
 
 void TestTheme::readableOnFallsBackWhenThemeTextWouldBeInvisible()
 {
-    // 黑色主題的正文色是淺色；若背景是白的（例如 markdown 內嵌了
-    // background-color:#fff 的原始 HTML），必須退回深色而不是硬用主題色。
+    // The black theme's text colour is light. On a white background — say raw
+    // HTML in the markdown carrying background-color:#fff — it must fall back to
+    // a dark colour instead of insisting on the theme colour.
     const QColor onWhite = Theme::readableOn(Qt::white, Theme::Dark);
     QVERIFY2(Theme::contrastRatio(onWhite, Qt::white) >= Theme::MinTextContrast,
              qPrintable(onWhite.name()));
@@ -380,7 +392,8 @@ void TestTheme::readableOnFallsBackWhenThemeTextWouldBeInvisible()
 
 void TestTheme::readableOnAlwaysReturnsSomethingReadable()
 {
-    // 掃一遍灰階與幾個彩色，任何背景都必須拿到可讀的前景
+    // Sweep the greys plus a few saturated colours: every background must yield
+    // a readable foreground
     for (Theme::Mode m : modes()) {
         for (int v = 0; v <= 255; v += 5) {
             const QColor bg(v, v, v);

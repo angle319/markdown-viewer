@@ -20,7 +20,7 @@ FileBrowserPanel::FileBrowserPanel(QWidget *parent)
     m_model->setNameFilters({ QStringLiteral("*.md"), QStringLiteral("*.markdown"),
                               QStringLiteral("*.mdx"), QStringLiteral("*.mdc"),
                               QStringLiteral("*.mkd"), QStringLiteral("*.txt") });
-    m_model->setNameFilterDisables(false);   // 不符合的直接隱藏，而不是變灰
+    m_model->setNameFilterDisables(false);   // Hide non-matching entries rather than greying them
     m_model->setFilter(QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot);
 
     m_view->setModel(m_model);
@@ -54,7 +54,8 @@ FileBrowserPanel::FileBrowserPanel(QWidget *parent)
     layout->addLayout(bar);
     layout->addWidget(m_view);
 
-    // 單擊：資料夾展開／收合，檔案就直接開（這個 panel 本身就是「預覽」入口）
+    // Single click: toggle directories, open files. This panel is itself the
+    // way documents get previewed, so a click opening one is the expected thing.
     connect(m_view, &QTreeView::clicked, this, [this](const QModelIndex &idx) {
         const QString path = m_model->filePath(idx);
         if (QFileInfo(path).isDir())
