@@ -2,6 +2,8 @@
 
 #include <QWidget>
 
+#include "Theme.h"
+
 #include <QTabBar>
 
 class DocumentView;
@@ -73,6 +75,7 @@ public:
 
     /// 作用中的面板會在分頁列下方顯示一條強調色細線。
     /// multiPane 為 false（沒有分割）時不顯示 —— 只有一格時標示它是多餘的。
+    void applyTheme(Theme::Mode mode);
     void setActive(bool active, bool multiPane);
     bool isActive() const { return m_active; }
     /// 強調線是否正在顯示（供測試驗證）
@@ -94,6 +97,8 @@ Q_SIGNALS:
     void tabDragOut(int index);
     /// 有分頁被放到這個面板上
     void tabDropped(PaneGroup *target, PaneGroup::DropZone zone);
+    /// 在某個分頁上按右鍵
+    void tabContextMenuRequested(int index, const QPoint &globalPos);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;

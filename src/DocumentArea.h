@@ -8,6 +8,7 @@
 class DocumentView;
 class MermaidCache;
 class QLabel;
+class QMenu;
 class QSplitter;
 
 /// 分割面板的容器 —— VS Code 的 editor group 模型。
@@ -62,6 +63,17 @@ public:
 
     /// 目前每一格顯示的文件，依面板順序。
     QList<DocumentView *> visibleViews() const;
+
+    /// 關閉同一格裡除了 keepIndex 以外的所有分頁。
+    void closeOtherTabs(PaneGroup *pane, int keepIndex);
+    /// 關閉同一格裡 fromIndex 右側的所有分頁。
+    void closeTabsToTheRight(PaneGroup *pane, int fromIndex);
+    /// 關閉整格。
+    void closePane(PaneGroup *pane);
+
+    /// 建立分頁的右鍵選單。呼叫端負責刪除。
+    /// 公開是為了可測 —— 測試要能檢查選項並直接觸發。
+    QMenu *buildTabContextMenu(PaneGroup *pane, int index, QWidget *parent = nullptr);
 
     void setTheme(Theme::Mode mode);
     void zoomIn();

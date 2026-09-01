@@ -81,6 +81,12 @@ VS Code 的 editor group 模型：**每個分割面板有自己的分頁列**，
 一格。這樣「哪個分頁對應哪一格」在畫面上是自明的。作用中的那一格會在分頁列
 下方顯示一條強調色細線（只有一格時不顯示）。
 
+分頁的選取狀態用三個線索拉開：**選取中**是頁面底色 + 正文色 + 粗體 + 頂端強調線，
+**未選取**沉一階底色 + 次要色文字。QTabBar 預設的選取狀態只差一點點底色，
+會看不出焦點在哪。
+
+分頁上按**右鍵**有：關閉、關閉其他、關閉右側全部、關閉這一格、移到左／右邊面板。
+
 分割的產生方式有三種：
 
 1. 選單／`Ctrl+Shift+1..4` 選面板數
@@ -202,7 +208,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-131 個測試函式、8 個套件：
+138 個測試函式、8 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -210,10 +216,10 @@ ctest --test-dir build --output-on-failure
 | codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
 | mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
-| theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
+| theme | 18 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
 | e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
-| e2e_tabs | 23 | 分頁、分割面板、拖曳分割、面板幾何不變式、各分頁獨立監看 |
+| e2e_tabs | 27 | 分頁、分割面板、拖曳分割、面板幾何不變式、各分頁獨立監看 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。

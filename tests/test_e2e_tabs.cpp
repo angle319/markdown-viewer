@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QLabel>
+#include <QMenu>
 #include <QLineEdit>
 #include <QSplitter>
 #include <QStandardPaths>
@@ -53,6 +54,12 @@ private slots:
     void activePaneIsMarkedOnlyWhenSplit();
     void paneGeometryStaysSaneAfterMoves();
     void panesGetComparableWidths();
+
+    // --- 分頁右鍵選單 ---
+    void contextMenuOffersCloseOptions();
+    void closeOthersLeavesOnlyThatTab();
+    void closeToTheRightKeepsLeftSide();
+    void closePaneClosesAllItsTabs();
 
     // --- 全域操作套用到所有分頁 ---
     void themeAppliesToEveryTab();
@@ -560,6 +567,93 @@ void TestE2eTabs::panesGetComparableWidths()
              qPrintable(QStringLiteral("最窄的面板只有 %1px").arg(minW)));
     QVERIFY2(maxW <= minW * 2,
              qPrintable(QStringLiteral("面板寬度差太多: %1 vs %2").arg(minW).arg(maxW)));
+}
+
+void TestE2eTabs::contextMenuOffersCloseOptions()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+
+    PaneGroup *pane = area()->paneAt(0);
+    QScopedPointer<QMenu> menu(area()->buildTabContextMenu(pane, 1));
+    QVERIFY(menu);
+
+    QStringList texts;
+    for (QAction *a : menu->actions())
+        if (!a->isSeparator())
+            texts << a->text();
+    QCOMPARE(texts, QStringList({ QStringLiteral("關閉"), QStringLiteral("關閉其他"),
+                                  QStringLiteral("關閉右側全部"), QStringLiteral("關閉這一格"),
+                                  QStringLiteral("移到右邊面板"),
+                                  QStringLiteral("移到左邊面板") }));
+
+    // 停用狀態要合理：只有一格時不能「關閉這一格」
+    const auto action = [&](const QString &t) -> QAction * {
+        for (QAction *a : menu->actions())
+            if (a->text() == t)
+                return a;
+        return nullptr;
+    };
+    QVERIFY(action(QStringLiteral("關閉其他"))->isEnabled());          // 有 3 個分頁
+    QVERIFY(action(QStringLiteral("關閉右側全部"))->isEnabled());       // index 1，右邊還有
+    QVERIFY(!action(QStringLiteral("關閉這一格"))->isEnabled());        // 只有一格
+
+    // 最後一個分頁沒有「右側」可關
+    QScopedPointer<QMenu> last(area()->buildTabContextMenu(pane, 2));
+    for (QAction *a : last->actions())
+        if (a->text() == QStringLiteral("關閉右側全部"))
+            QVERIFY(!a->isEnabled());
+}
+
+void TestE2eTabs::closeOthersLeavesOnlyThatTab()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+    QCOMPARE(area()->count(), 3);
+
+    PaneGroup *pane = area()->paneAt(0);
+    area()->closeOtherTabs(pane, 1);          // 留下「B」
+
+    QCOMPARE(area()->count(), 1);
+    QCOMPARE(area()->activeView()->title(), QStringLiteral("B"));
+    QCOMPARE(pane->tabBar()->count(), 1);
+}
+
+void TestE2eTabs::closeToTheRightKeepsLeftSide()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md"), QStringLiteral("d.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+    QCOMPARE(area()->count(), 4);
+
+    PaneGroup *pane = area()->paneAt(0);
+    area()->closeTabsToTheRight(pane, 1);     // 留下 A、B
+
+    QCOMPARE(area()->count(), 2);
+    QStringList titles;
+    for (int i = 0; i < area()->count(); ++i)
+        titles << area()->viewAt(i)->title();
+    QCOMPARE(titles, QStringList({ QStringLiteral("A"), QStringLiteral("B") }));
+}
+
+void TestE2eTabs::closePaneClosesAllItsTabs()
+{
+    for (const QString &n : { QStringLiteral("a.md"), QStringLiteral("b.md"),
+                              QStringLiteral("c.md") })
+        QVERIFY(m_win->openFile(make(n, n.left(1).toUpper())));
+    area()->setPaneCount(2);
+    QCOMPARE(area()->paneCount(), 2);
+
+    const int inSecondPane = area()->paneAt(1)->count();
+    QVERIFY(inSecondPane >= 1);
+
+    area()->closePane(area()->paneAt(1));
+
+    QCOMPARE(area()->paneCount(), 1);          // 空格自動收掉
+    QCOMPARE(area()->count(), 3 - inSecondPane);
+    QVERIFY(area()->activeView() != nullptr);
 }
 
 // ------------------------------------------------ 全域操作套用到所有分頁

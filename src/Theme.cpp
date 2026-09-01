@@ -22,6 +22,7 @@ const Theme::Colors &Theme::colors(Mode m)
         QStringLiteral("#f2f2f2"),   // codeBackground
         QStringLiteral("#8f2d56"),   // codeInline    6.67:1 on #f4eaee, 色相 335°
         QStringLiteral("#f4eaee"),   // codeInlineBackground
+        QStringLiteral("#e2e2e2"),   // tabInactive（未選取分頁；muted 文字 7.40:1）
         QStringLiteral("#8c8c8c"),   // border       3.36:1（非文字）
         QStringLiteral("#e8e8e8"),   // tableHeader
     };
@@ -33,6 +34,7 @@ const Theme::Colors &Theme::colors(Mode m)
         QStringLiteral("#131313"),   // codeBackground
         QStringLiteral("#f0a3c8"),   // codeInline    9.25:1 on #1d1418, 色相 331°
         QStringLiteral("#1d1418"),   // codeInlineBackground
+        QStringLiteral("#1c1c1c"),   // tabInactive（未選取分頁；muted 文字 7.00:1）
         QStringLiteral("#707070"),   // border       4.24:1（非文字）
         QStringLiteral("#1c1c1c"),   // tableHeader
     };
@@ -113,6 +115,47 @@ QString Theme::documentStyleSheet(Mode m)
         css.replace(t.first, t.second);
 
     return css;
+}
+
+QString Theme::tabBarStyleSheet(Mode m)
+{
+    const Colors &c = colors(m);
+
+    // 選取中的分頁用頁面底色 + 正文色 + 頂端強調線；未選取的沉一階、用次要色。
+    // 這樣「焦點在哪個分頁」有三個線索（底色、文字亮度、強調線），
+    // 不是只靠一點點底色差異。
+    QString qss = QStringLiteral(R"(
+        QTabBar::tab {
+            background: @INACTIVE@;
+            color: @MUTED@;
+            padding: 5px 10px;
+            margin-right: 2px;
+            border-top: 2px solid transparent;
+            border-bottom: 1px solid @BORDER@;
+        }
+        QTabBar::tab:selected {
+            background: @BG@;
+            color: @TEXT@;
+            border-top: 2px solid @LINK@;
+            border-bottom: 1px solid @BG@;
+            font-weight: bold;
+        }
+        QTabBar::tab:hover:!selected {
+            color: @TEXT@;
+        }
+    )");
+
+    const QList<QPair<QString, QString>> tokens{
+        { QStringLiteral("@INACTIVE@"), c.tabInactive },
+        { QStringLiteral("@MUTED@"), c.muted },
+        { QStringLiteral("@BG@"), c.background },
+        { QStringLiteral("@TEXT@"), c.text },
+        { QStringLiteral("@LINK@"), c.link },
+        { QStringLiteral("@BORDER@"), c.border },
+    };
+    for (const auto &t : tokens)
+        qss.replace(t.first, t.second);
+    return qss;
 }
 
 QPalette Theme::palette(Mode m)

@@ -112,6 +112,15 @@ PaneGroup::PaneGroup(QWidget *parent)
 
     connect(m_tabBar, &PaneTabBar::tabDragOut, this, &PaneGroup::tabDragOut);
 
+    m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tabBar, &QWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const int index = m_tabBar->tabAt(pos);
+        if (index < 0)
+            return;
+        Q_EMIT activated();
+        Q_EMIT tabContextMenuRequested(index, m_tabBar->mapToGlobal(pos));
+    });
+
     m_dropHint = new QRubberBand(QRubberBand::Rectangle, this);
     setAcceptDrops(true);
     // 擠到比這更窄，表格與行內 code 會被逼到逐字換行
@@ -262,6 +271,11 @@ void PaneGroup::refreshTabText(DocumentView *view)
     const QString title = view->title();
     m_tabBar->setTabText(i, title.isEmpty() ? QStringLiteral("(未命名)") : title);
     m_tabBar->setTabToolTip(i, view->path());
+}
+
+void PaneGroup::applyTheme(Theme::Mode mode)
+{
+    m_tabBar->setStyleSheet(Theme::tabBarStyleSheet(mode));
 }
 
 void PaneGroup::setActive(bool active, bool multiPane)

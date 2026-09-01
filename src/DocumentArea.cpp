@@ -3,7 +3,9 @@
 #include "DocumentView.h"
 
 #include <QFileInfo>
+#include <QAction>
 #include <QLabel>
+#include <QMenu>
 #include <QSplitter>
 #include <QTabBar>
 #include <QVBoxLayout>
@@ -50,6 +52,7 @@ PaneGroup *DocumentArea::createPane(int at)
         m_splitter->addWidget(pane);
     else
         m_splitter->insertWidget(at, pane);
+    pane->applyTheme(m_mode);
     wirePane(pane);
     if (!m_activeGroup)
         setActivePane(pane);
@@ -77,6 +80,12 @@ void DocumentArea::wirePane(PaneGroup *pane)
         m_dragSource = { pane, index };
     });
     connect(pane, &PaneGroup::tabDropped, this, &DocumentArea::onTabDropped);
+    connect(pane, &PaneGroup::tabContextMenuRequested, this,
+            [this, pane](int index, const QPoint &globalPos) {
+                QMenu *menu = buildTabContextMenu(pane, index, this);
+                menu->setAttribute(Qt::WA_DeleteOnClose);
+                menu->popup(globalPos);
+            });
 }
 
 void DocumentArea::setActivePane(PaneGroup *pane)
@@ -467,9 +476,115 @@ DocumentView *DocumentArea::openFile(const QString &path)
 
 // ----------------------------------------------------------- 全域操作
 
+void DocumentArea::closeOtherTabs(PaneGroup *pane, int keepIndex)
+{
+    if (!pane)
+        return;
+    DocumentView *keep = pane->viewAt(keepIndex);
+    if (!keep)
+        return;
+
+    for (int i = pane->count() - 1; i >= 0; --i)
+        if (pane->viewAt(i) != keep)
+            pane->removeView(i);
+
+    pane->setCurrentIndex(pane->indexOf(keep));
+    setActivePane(pane);
+    pruneEmptyPanes();
+    refreshLayout();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::closeTabsToTheRight(PaneGroup *pane, int fromIndex)
+{
+    if (!pane || fromIndex < 0)
+        return;
+    for (int i = pane->count() - 1; i > fromIndex; --i)
+        pane->removeView(i);
+
+    pane->setCurrentIndex(qMin(fromIndex, pane->count() - 1));
+    setActivePane(pane);
+    pruneEmptyPanes();
+    refreshLayout();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+void DocumentArea::closePane(PaneGroup *pane)
+{
+    if (!pane)
+        return;
+    while (pane->count() > 0)
+        pane->removeView(pane->count() - 1);
+    pruneEmptyPanes();
+    refreshLayout();
+    updatePlaceholder();
+    Q_EMIT tabsChanged();
+    Q_EMIT activeViewChanged();
+}
+
+QMenu *DocumentArea::buildTabContextMenu(PaneGroup *pane, int index, QWidget *parent)
+{
+    auto *menu = new QMenu(parent);
+    if (!pane || index < 0)
+        return menu;
+
+    const int total = pane->count();
+
+    QAction *close = menu->addAction(QStringLiteral("關閉"));
+    connect(close, &QAction::triggered, this, [this, pane, index] {
+        pane->removeView(index);
+        pruneEmptyPanes();
+        refreshLayout();
+        updatePlaceholder();
+        Q_EMIT tabsChanged();
+        Q_EMIT activeViewChanged();
+    });
+
+    QAction *others = menu->addAction(QStringLiteral("關閉其他"));
+    others->setEnabled(total > 1);
+    connect(others, &QAction::triggered, this,
+            [this, pane, index] { closeOtherTabs(pane, index); });
+
+    QAction *right = menu->addAction(QStringLiteral("關閉右側全部"));
+    right->setEnabled(index < total - 1);
+    connect(right, &QAction::triggered, this,
+            [this, pane, index] { closeTabsToTheRight(pane, index); });
+
+    menu->addSeparator();
+
+    QAction *closePaneAct = menu->addAction(QStringLiteral("關閉這一格"));
+    closePaneAct->setEnabled(paneCount() > 1);
+    connect(closePaneAct, &QAction::triggered, this, [this, pane] { closePane(pane); });
+
+    menu->addSeparator();
+
+    QAction *moveRight = menu->addAction(QStringLiteral("移到右邊面板"));
+    connect(moveRight, &QAction::triggered, this, [this, pane, index] {
+        setActivePane(pane);
+        pane->setCurrentIndex(index);
+        moveActiveTabToPane(1);
+    });
+
+    QAction *moveLeft = menu->addAction(QStringLiteral("移到左邊面板"));
+    connect(moveLeft, &QAction::triggered, this, [this, pane, index] {
+        setActivePane(pane);
+        pane->setCurrentIndex(index);
+        moveActiveTabToPane(-1);
+    });
+
+    return menu;
+}
+
 void DocumentArea::setTheme(Theme::Mode mode)
 {
     m_mode = mode;
+    for (int i = 0; i < m_splitter->count(); ++i)
+        if (PaneGroup *p = paneAt(i))
+            p->applyTheme(mode);
     for (int i = 0; i < count(); ++i)
         if (DocumentView *v = viewAt(i))
             v->setTheme(mode);
