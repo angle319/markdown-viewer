@@ -5,6 +5,7 @@
 #include <QScrollBar>
 #include <QTextFragment>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextDocument>
@@ -67,6 +68,7 @@ private slots:
     void tableUsesHorizontalRulesOnly();
     void headingSizesFollowThemeScale();
     void bodyTextUsesComfortableLineHeight();
+    void wideTableOpensQuickly();
     void linksAreUnderlinedAndUseLinkColour();
     void everyTextFragmentIsReadableInBothThemes();
     void hardcodedColoursInSampleAreCorrected();
@@ -598,6 +600,54 @@ void TestE2eRegression::bodyTextUsesComfortableLineHeight()
              qPrintable(QStringLiteral("只有 %1 個 block 套到行高，語料可能有問題")
                             .arg(checked)));
     qInfo() << "套用行高的 block 數 =" << checked;
+}
+
+void TestE2eRegression::wideTableOpensQuickly()
+{
+    // 曾經的退化：一份 6.9KB、只有 72 行但含 65 列表格的文件要花 2146ms 開，
+    // 而 sample.md 只要 9ms。原因是 document tree walk 每改一個 cell / 片段
+    // 就觸發一次重新排版，在 cell 數多時是二次方級的成本。
+    // 修法是把每個 walk 的修改包進單一 editBlock，並關掉 undo stack。
+    // 修完是 23ms（93 倍）。這支測試守住那個修法別被改掉。
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    QString md = QStringLiteral("# 大表格\n\n| 頁數 | Space | key | 最舊 | 最新 |\n"
+                                "| ---: | --- | --- | --- | --- |\n");
+    const int rows = 300;
+    for (int i = 0; i < rows; ++i)
+        md += QStringLiteral("| %1 | [Space %1](spaces/s%1/_INDEX.md) | `K%1` | 2025-01-01 | 2026-08-31 |\n")
+                  .arg(i);
+
+    const QString path = dir.path() + QStringLiteral("/wide.md");
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write(md.toUtf8());
+    f.close();
+
+    m_win->openFile(path);          // 暖身（字型快取等）
+
+    QElapsedTimer timer;
+    timer.start();
+    QVERIFY(m_win->openFile(path));
+    const qint64 ms = timer.elapsed();
+
+    // 確認語料真的產生了那麼多 cell，否則這支測試等於沒驗
+    int cells = 0;
+    for (QTextFrame *fr : browser()->document()->rootFrame()->childFrames())
+        if (auto *t = qobject_cast<QTextTable *>(fr))
+            cells += t->rows() * t->columns();
+    QVERIFY2(cells >= 1500, qPrintable(QStringLiteral("只有 %1 個 cell").arg(cells)));
+
+    qInfo() << "寬表格" << cells << "個 cell 開檔耗時" << ms << "ms";
+
+    // 門檻放寬到 1500ms：這是「別再退回二次方」的哨兵，不是效能基準。
+    // 退化前光 325 個 cell 就要 2146ms，這裡的 cell 數是它的 4.6 倍。
+    QVERIFY2(ms < 1500,
+             qPrintable(QStringLiteral("%1 個 cell 花了 %2ms，可能又退回逐項重排")
+                            .arg(cells).arg(ms)));
+
+    QVERIFY(m_win->openFile(QString::fromUtf8(SAMPLE_MD)));
 }
 
 void TestE2eRegression::linksAreUnderlinedAndUseLinkColour()

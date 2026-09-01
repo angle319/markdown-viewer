@@ -128,6 +128,10 @@ public:
         setOpenLinks(false);           // 連結交給 MainWindow 決定怎麼處理
         setOpenExternalLinks(false);
         setFrameShape(QFrame::NoFrame);
+
+        // 檢視器不需要復原，而下面那幾個 tree walk 會做上百次格式修改，
+        // 每一次都會被記進 undo stack。關掉省下大量記憶體與時間。
+        document()->setUndoRedoEnabled(false);
     }
 
     void setMermaidSources(const QVector<MermaidBlock> &blocks)
@@ -193,6 +197,10 @@ public:
             }
         }
 
+        if (fixes.isEmpty())
+            return;
+        QTextCursor batch(doc);
+        batch.beginEditBlock();
         for (int i = fixes.size() - 1; i >= 0; --i) {
             const Fix &fx = fixes.at(i);
             QTextCursor cur(doc);
@@ -203,6 +211,7 @@ public:
             merge.setForeground(fx.fg);
             cur.mergeCharFormat(merge);
         }
+        batch.endEditBlock();
     }
 
     /// 圖片的邏輯（顯示）尺寸，由 loadResource 記錄、供 applyImageSizing 使用。
@@ -254,7 +263,13 @@ public:
             }
         }
 
-        // 收集完再改，避免邊走邊改文件
+        // 收集完再改，避免邊走邊改文件。
+        // 整批包進一個 edit block：否則每一次 setCharFormat 都會觸發一次
+        // 重新排版，在有大量片段的文件上是二次方級的成本。
+        if (fixes.isEmpty())
+            return;
+        QTextCursor batch(doc);
+        batch.beginEditBlock();
         for (int i = fixes.size() - 1; i >= 0; --i) {
             const Fix &fx = fixes.at(i);
             QTextCursor cur(doc);
@@ -270,6 +285,7 @@ public:
                 cur.insertText(fx.missingLabel, plain);
             }
         }
+        batch.endEditBlock();
     }
 
     /// 明確設定每個標題層級的字級。
@@ -315,6 +331,10 @@ public:
             }
         }
 
+        if (fixes.isEmpty())
+            return;
+        QTextCursor batch(doc);
+        batch.beginEditBlock();
         for (int i = fixes.size() - 1; i >= 0; --i) {
             const Fix &fx = fixes.at(i);
             QTextCursor cur(doc);
@@ -323,6 +343,7 @@ public:
             // setCharFormat 而非 merge：merge 無法「移除」屬性
             cur.setCharFormat(fx.fmt);
         }
+        batch.endEditBlock();
     }
 
     /// 表格改成「只有橫線」的樣式（對照 Chrome extension 的觀感）。
@@ -336,6 +357,9 @@ public:
         const QBrush rule(QColor(c.border));
 
         QTextDocument *doc = document();
+        QTextCursor batch(doc);
+        batch.beginEditBlock();
+
         for (QTextFrame *frame : doc->rootFrame()->childFrames()) {
             auto *table = qobject_cast<QTextTable *>(frame);
             if (!table)
@@ -374,6 +398,7 @@ public:
                 }
             }
         }
+        batch.endEditBlock();
     }
 
     /// 文件中所有標題的位置，順序與 Document::toc 一致。

@@ -524,3 +524,48 @@ extension（body 16px）：
 | 行內 code 圓角 | Qt rich-text 不支援 `border-radius`，是方角 |
 | 待辦核取方塊 | Qt 不渲染 `<input type=checkbox>`，用 ☑/☐ 字元 |
 | 清單間距 | 28.9px vs 24px，Qt 對 li 的 leading 處理不同，已收到可接受範圍 |
+
+## 17. 效能：寬表格開檔退化與拖曳開檔（2026-09-01）
+
+### 17.1 2146ms → 23ms
+
+使用者回報開 `edu-confluence-previous-docs/INDEX.md` 很慢。檔案只有 6.9KB、72 行，
+所以不是大小問題 —— 是那張 **65 列 × 5 欄 = 325 個 cell** 的表格。
+
+量測：
+
+| 文件 | blocks | cells | 開檔 |
+|---|---|---|---|
+| `sample.md` | 62 | 12 | 9ms |
+| `INDEX.md` | 329 | 325 | **2146ms** |
+
+原因是四個 document tree walk（圖片尺寸、標題字級、表格樣式、對比修正）
+逐項修改格式，**每一次 `setCharFormat` / `setFormat` 都會觸發一次重新排版**，
+而且每一筆都進 undo stack。在 cell 多的文件上是二次方級的成本。
+
+兩項修正：
+
+1. 每個 walk 的修改包進單一 `beginEditBlock()` / `endEditBlock()`，讓 Qt 合併成
+   一次重排。
+2. 建構時 `document()->setUndoRedoEnabled(false)` —— 檢視器不需要復原，
+   而那幾個 walk 會做上百次修改。
+
+結果 `INDEX.md` 開檔 **23ms**（93 倍）。
+`wideTableOpensQuickly()` 以 1505 個 cell 的合成表格守住（實測 113ms，門檻 1500ms；
+退化前光 325 個 cell 就要 2146ms，所以這個門檻能穩定抓到退回逐項重排）。
+
+### 17.2 拖曳開檔
+
+`MainWindow` 開啟 `acceptDrops`，並把 `QTextBrowser` 與側邊欄所有子 widget 的
+`acceptDrops` 關掉 —— 否則它們會先收下 drop，事件冒泡不到主視窗。
+拖入檔案就開、資料夾就換側邊欄的根，與路徑列共用 `onPathSubmitted()`。
+一次拖多個時優先開 markdown 檔。
+
+**測試方式的取捨**：合成 `QDropEvent` 送給 widget 在測試裡走不到 ——
+`QWidget::event()` 是 protected，而 `QApplication::notify` 對拖放另有一套經過
+`QDragManager` 的流程。所以把邏輯抽成公開的 `openFromUrls()`，`dropEvent` 只是
+薄轉接；測試直接驗 `openFromUrls()`，另外用 `acceptDrops` 斷言驗「主視窗接受、
+子 widget 不攔截」這條接線。
+
+**誠實記錄**：真正的 X11 拖放動作沒有被自動化測試涵蓋（這台沒有 xdotool
+之類的工具可以合成拖放序列），需要人工驗。

@@ -16,6 +16,9 @@
 #include <QCloseEvent>
 #include <QtMath>
 #include <QDesktopServices>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -121,6 +124,59 @@ void MainWindow::buildUi()
     connect(m_cache, &MermaidCache::idle, this, [this] { updateStatus(); });
 
     resize(1200, 820);
+
+    // 拖曳開檔。QTextBrowser 與側邊欄的 view 預設會吃掉 drop 事件，
+    // 關掉它們的 acceptDrops 讓事件冒泡到 MainWindow。
+    setAcceptDrops(true);
+    m_backend->widget()->setAcceptDrops(false);
+    m_sidebar->setAcceptDrops(false);
+    for (QWidget *w : m_sidebar->findChildren<QWidget *>())
+        w->setAcceptDrops(false);
+}
+
+QString MainWindow::firstUsablePath(const QList<QUrl> &urls)
+{
+    // 先找 markdown 檔，找不到再退而求其次收資料夾 ——
+    // 一次拖多個東西時，開檔比換資料夾更符合預期。
+    QString folder;
+    for (const QUrl &u : urls) {
+        if (!u.isLocalFile())
+            continue;
+        const QString path = u.toLocalFile();
+        const QFileInfo fi(path);
+        if (fi.isFile() && looksLikeMarkdown(path))
+            return fi.absoluteFilePath();
+        if (fi.isDir() && folder.isEmpty())
+            folder = fi.absoluteFilePath();
+    }
+    return folder;
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *e)
+{
+    if (e->mimeData()->hasUrls() && !firstUsablePath(e->mimeData()->urls()).isEmpty())
+        e->acceptProposedAction();
+    else
+        e->ignore();
+}
+
+bool MainWindow::openFromUrls(const QList<QUrl> &urls)
+{
+    const QString path = firstUsablePath(urls);
+    if (path.isEmpty()) {
+        updateStatus(QStringLiteral("拖入的東西不是 markdown 檔或資料夾"));
+        return false;
+    }
+    onPathSubmitted(path);   // 與路徑列走同一條路徑：檔案就開、資料夾就換根
+    return true;
+}
+
+void MainWindow::dropEvent(QDropEvent *e)
+{
+    if (e->mimeData()->hasUrls() && openFromUrls(e->mimeData()->urls()))
+        e->acceptProposedAction();
+    else
+        e->ignore();
 }
 
 void MainWindow::buildMenus()

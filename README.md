@@ -70,6 +70,11 @@ npm i -g @mermaid-js/mermaid-cli
 - `Esc` 還原成目前檔案的路徑並把焦點交回內容區
 - 路徑不存在時只在狀態列說明，不會關掉目前開著的文件
 
+### 拖曳
+
+把 markdown 檔或資料夾拖進視窗即可開啟／換根，與路徑列走同一條路徑。
+一次拖多個時**優先開 markdown 檔**，沒有檔案才收資料夾。
+
 ### 側邊欄
 
 兩個分頁：**段落**（標題樹，隨捲動高亮）與**檔案**（只顯示資料夾與
@@ -139,6 +144,17 @@ markdown 類檔案）。檔案變更會自動重新載入並保留捲動位置�
 `docs/sample.md` 涵蓋所有 v0.1 該處理的語法，`docs/headings.md` 專門涵蓋
 H1–H6 的層級（含標題緊接標題、標題內含行內樣式），兩份都用來手動驗收。
 
+## 效能
+
+document tree walk（圖片尺寸、標題字級、表格樣式、對比修正）的修改**必須包在
+單一 `beginEditBlock`/`endEditBlock` 裡**，而且文件要關掉 undo
+（`setUndoRedoEnabled(false)`）。否則每一次 `setCharFormat` / `setFormat` 都會
+觸發一次重新排版，在 cell 或片段多的文件上是二次方級的成本。
+
+實測：一份 6.9KB、只有 72 行但含 65 列表格（325 個 cell）的文件，
+修復前開檔 **2146ms**，修復後 **23ms**（93 倍）。
+`wideTableOpensQuickly()` 用 1505 個 cell 的合成表格守住這件事。
+
 ## 記憶體
 
 量整個行程樹的 PSS（`/proc/<pid>/smaps_rollup`）。RSS 會把共享函式庫頁面
@@ -160,7 +176,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-103 個測試函式、7 個套件：
+108 個測試函式、7 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -169,8 +185,8 @@ ctest --test-dir build --output-on-failure
 | mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
-| e2e_viewer | 22 | 驅動真正的 MainWindow；路徑列與主題流程 |
-| e2e_regression | 25 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
+| e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。

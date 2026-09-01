@@ -8,7 +8,9 @@
 #include <QScrollBar>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QDropEvent>
 #include <QLineEdit>
+#include <QMimeData>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -53,6 +55,12 @@ private slots:
     void pathBarReportsMissingPathWithoutCrashing();
     void pathBarExpandsTildeAndRelativePaths();
     void ctrlLFocusesPathBar();
+
+    // --- 拖曳 ---
+    void dropOpensMarkdownFile();
+    void dropFolderSwitchesFileBrowser();
+    void dropIgnoresUnsupportedFile();
+    void firstUsablePathPrefersMarkdownOverFolder();
     void zoomChangesFontSizeAndResets();
     void sidebarCanBeHidden();
     void externalEditTriggersReload();
@@ -636,6 +644,90 @@ void TestE2eViewer::ctrlLFocusesPathBar()
     edit->setText(QStringLiteral("/tmp/whatever.md"));
     QTest::keyClick(edit, Qt::Key_Escape);
     QCOMPARE(edit->text(), fixturePath(QStringLiteral("main.md")));
+}
+
+// -------------------------------------------------------------------- 拖曳
+
+/// 模擬拖入一組路徑。
+///
+/// 走 openFromUrls() 而不是合成 QDropEvent：QWidget::event() 是 protected，
+/// 而 QApplication::notify 對拖放另有一套經過 QDragManager 的流程，
+/// 在測試裡送不到 dropEvent。dropEvent 本身只是 openFromUrls 的薄轉接，
+/// 「視窗接受拖放、子 widget 不攔截」則另外用 acceptDrops 斷言。
+static void sendDrop(MainWindow *win, const QStringList &paths)
+{
+    QList<QUrl> urls;
+    for (const QString &p : paths)
+        urls << QUrl::fromLocalFile(p);
+    win->openFromUrls(urls);
+}
+
+void TestE2eViewer::dropOpensMarkdownFile()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    QVERIFY2(m_win->acceptDrops(), "視窗沒有開啟拖放");
+
+    // 子 widget 若自己收下 drop，事件就冒泡不到 MainWindow
+    QVERIFY2(!browser()->acceptDrops(), "QTextBrowser 會攔截 drop");
+    QVERIFY2(!sidebar()->acceptDrops(), "側邊欄會攔截 drop");
+    for (QWidget *w : sidebar()->findChildren<QWidget *>())
+        QVERIFY2(!w->acceptDrops(),
+                 qPrintable(QStringLiteral("%1 會攔截 drop")
+                                .arg(QString::fromLatin1(w->metaObject()->className()))));
+
+    sendDrop(m_win.data(), { fixturePath(QStringLiteral("other.md")) });
+
+    QTRY_VERIFY2(m_win->windowTitle().startsWith(QStringLiteral("另一份文件")),
+                 qPrintable(m_win->windowTitle()));
+    // 路徑列要跟著更新
+    QCOMPARE(m_win->findChild<PathBar *>()->path(),
+             fixturePath(QStringLiteral("other.md")));
+}
+
+void TestE2eViewer::dropFolderSwitchesFileBrowser()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    QVERIFY(QDir().mkpath(m_dir->path() + QStringLiteral("/dropped")));
+    writeFile(QStringLiteral("dropped/inner.md"), QStringLiteral("# 拖入的資料夾\n"));
+
+    sendDrop(m_win.data(), { m_dir->path() + QStringLiteral("/dropped") });
+
+    QTRY_COMPARE(sidebar()->currentIndex(), 1);
+    auto *model = qobject_cast<QFileSystemModel *>(fileTree()->model());
+    QTRY_COMPARE(model->filePath(fileTree()->rootIndex()),
+                 QFileInfo(m_dir->path() + QStringLiteral("/dropped")).absoluteFilePath());
+    // 資料夾不該被當成 markdown 開掉目前的文件
+    QVERIFY(m_win->windowTitle().startsWith(QStringLiteral("主文件標題")));
+}
+
+void TestE2eViewer::dropIgnoresUnsupportedFile()
+{
+    QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
+    const QString before = m_win->windowTitle();
+
+    sendDrop(m_win.data(), { fixturePath(QStringLiteral("ignore.cpp")) });
+
+    QCOMPARE(m_win->windowTitle(), before);   // 沒換掉目前文件
+    QTRY_VERIFY(m_win->statusBar()->currentMessage().contains(QStringLiteral("不是 markdown")));
+}
+
+void TestE2eViewer::firstUsablePathPrefersMarkdownOverFolder()
+{
+    const QString md = fixturePath(QStringLiteral("main.md"));
+    const QString cpp = fixturePath(QStringLiteral("ignore.cpp"));
+    QVERIFY(QDir().mkpath(m_dir->path() + QStringLiteral("/adir")));
+    const QString dir = m_dir->path() + QStringLiteral("/adir");
+
+    // 一次拖多個時，開檔比換資料夾更符合預期
+    QCOMPARE(MainWindow::firstUsablePath({ QUrl::fromLocalFile(dir),
+                                           QUrl::fromLocalFile(md) }),
+             QFileInfo(md).absoluteFilePath());
+    QCOMPARE(MainWindow::firstUsablePath({ QUrl::fromLocalFile(dir) }),
+             QFileInfo(dir).absoluteFilePath());
+    QVERIFY(MainWindow::firstUsablePath({ QUrl::fromLocalFile(cpp) }).isEmpty());
+    QVERIFY(MainWindow::firstUsablePath({ QUrl(QStringLiteral("https://example.com/a.md")) })
+                .isEmpty());
+    QVERIFY(MainWindow::firstUsablePath({}).isEmpty());
 }
 
 void TestE2eViewer::zoomChangesFontSizeAndResets()
