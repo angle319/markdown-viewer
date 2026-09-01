@@ -285,6 +285,28 @@ MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
   兩個值得記的慣例：merge commit 用 `chore:`，避免產生 changelog 時同一份工作被列兩次；
   subject 開頭小寫，因為 config-conventional 的 `subject-case` 規則禁止 sentence-case。
 
+### 檢查機制
+
+上面這些慣例是**會被檢查的**，不只是寫著：
+
+| 層 | 跑什麼 | 繞得過嗎 |
+|---|---|---|
+| `scripts/check-repo.sh` | 六項檢查，手動執行 | 會，不跑就沒了 |
+| `.githooks/pre-commit`、`.githooks/commit-msg` | 同樣的檢查，加上 commit message | 會，`--no-verify` |
+
+用 `./scripts/setup-dev.sh` 啟用 hook；`build.sh` 會呼叫它，所以建置過就有了。hook 用
+`scripts/check-commit-msg.py` 而不是 commitlint 檢查訊息，這樣離線也能 commit；訊息比較特別時，
+push 前用上面那行指令跑一次真正的 commitlint。
+
+這個專案沒有 CI，建置與驗證都在本機。也就是說這些檢查的效力等於「有沒有養成跑它的習慣」——
+說一個改動完成之前，先跑過 `./scripts/check-repo.sh` 與測試。
+
+六項檢查每一項都對應這裡真的發生過的事：程式碼註解殘留中文、公開 repo 裡出現內部識別字、
+測試裡寫死家目錄絕對路徑、雙語規格結構走鐘、兩份 README 互連失效，以及測試數字憑記憶寫、
+連錯三次。
+
+[AGENTS.md](AGENTS.md) 把這些慣例整理給後續接手的人或 agent。
+
 ## 狀態
 
 v0.2，已在真實 X11 與 offscreen 下驗證。

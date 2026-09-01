@@ -298,6 +298,30 @@ what the behaviour *is*, the design document says *why it ended up that way*.
   list the same work twice, and subjects start lower case because config-conventional's
   `subject-case` rule forbids sentence-case.
 
+### Enforcement
+
+The conventions above are checked, not just written down:
+
+| Layer | What it runs | Bypassable? |
+|---|---|---|
+| `scripts/check-repo.sh` | six repository checks, by hand | yes, by not running it |
+| `.githooks/pre-commit`, `.githooks/commit-msg` | the same checks, plus the commit message | yes, `--no-verify` |
+
+Enable the hooks with `./scripts/setup-dev.sh`; `build.sh` calls it, so building is enough. The
+hook checks the commit message with `scripts/check-commit-msg.py` rather than commitlint, so that
+committing works offline; run the commitlint command above by hand before pushing an unusual one.
+
+There is no CI. The project is built and verified locally, which means the checks are only as good
+as the habit of running them — `./scripts/check-repo.sh` and the test suite before calling a change
+done.
+
+Each of the six checks exists because that exact problem happened here: Chinese left in code
+comments, internal identifiers in a public repository, an absolute home path hard-coded in a test,
+bilingual specs drifting apart, READMEs losing their cross-links, and a documented test count that
+was wrong three times because it was written from memory.
+
+[AGENTS.md](AGENTS.md) states the conventions for anyone — human or agent — picking the project up.
+
 ## Status
 
 v0.2. Verified under both real X11 and offscreen.

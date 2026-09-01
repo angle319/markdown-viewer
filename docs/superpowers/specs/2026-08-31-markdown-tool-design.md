@@ -792,3 +792,79 @@ QStackedWidget 裡、只有當前分頁可見、內容落在分頁列下方）�
 `document()->defaultFont()`。
 
 總計 **8 個套件、139 個測試函式**。
+
+## 22. 把慣例變成可執行的檢查（2026-09-01）
+
+### 動機
+
+前面 21 節記了一堆踩過的坑，但**寫在文件裡的規則，下一個 agent 不會讀**。實際發生過的重複性錯誤：
+
+| 錯誤 | 發生次數 |
+|---|---|
+| README 裡的測試數字憑記憶寫，與實際不符（138/136、103/101、124/123） | 3 |
+| 程式碼註解寫成中文 | 多次 |
+| 公開 repo 裡殘留內部識別字（內部 repo 名、內部文件標題當 fixture） | push 前才發現 |
+| 測試裡寫死家目錄絕對路徑 | 1 |
+| commit message 不符 Conventional Commits | 全部 23 筆都要重寫 |
+
+所以這節做的是：把這些規則變成**會失敗的指令**。
+
+### 兩層設計，以及為什麼沒有第三層
+
+| 層 | 檔案 | 繞得過嗎 |
+|---|---|---|
+| 手動檢查 | `scripts/check-repo.sh` | 會 —— 不跑就沒了 |
+| git hook | `.githooks/pre-commit`、`.githooks/commit-msg` | 會 —— `--no-verify`，或沒跑過 setup 的 clone |
+
+hook 存在 repo 裡的 `.githooks/`（而不是 `.git/hooks/`），這樣新 clone 只要一行就能啟用；
+`scripts/setup-dev.sh` 設定 `core.hooksPath`，而 `build.sh` 會呼叫它，所以只要建置過就有 hook。
+
+原本還做了第三層 GitHub Actions —— 那是唯一繞不過的一層。但這是個人專案、建置與驗證都在本機，
+CI 的價值不值得多養一份 runner 環境（Qt 套件名、mmdc 不存在時的 degrade 路徑都得另外顧），
+所以拿掉了。代價要講清楚：**現在兩層都繞得過**，檢查的效力等於跑它的習慣。
+`AGENTS.md` 因此把「回報完成前先跑 build + ctest」寫成不可省略的一步。
+
+### `scripts/check-repo.sh` 的六項
+
+每一項都對應上表的一個真實錯誤：
+
+1. 程式碼註解是英文（允許一行 `中：` 摘要）
+2. 沒有內部／公司特定識別字
+3. 沒有寫死的家目錄絕對路徑（引號後緊接 home 或 Users 的形式）
+4. openspec 雙語規格結構同步（呼叫 `openspec/check-bilingual.sh`）
+5. 兩份 README 互相連結
+6. 文件裡寫的測試函式數字，與 `-functions` 實際輸出相符
+
+### commit message 為什麼不直接呼叫 commitlint
+
+hook 若用 `npx --yes ... commitlint`，等於每次 commit 都依賴網路；離線時整個擋住，而**擋住人做事的
+hook 最後會被關掉**。所以：
+
+- hook 用 `scripts/check-commit-msg.py`，離線、即時、涵蓋核心規則（type 白名單、subject 小寫、
+  不以句點結尾、header ≤ 100、header 後空行、body 行長、以及 `word: ` 開頭會被當 git trailer 的陷阱）。
+- 訊息比較特別時，push 前手動跑一次真正的 commitlint（指令在 README 的慣例一節）。
+
+這個取捨寫在 `check-commit-msg.py` 的 docstring 裡。
+
+### 驗證方式：注入錯誤，確認檢查真的會失敗
+
+這一節最重要的部分。**一個永遠通過的檢查，比沒有檢查更糟**——它會買到假的信心（第 12 節的
+mermaid SVG 就是這樣過關的）。所以每一項檢查都在副本上注入對應的違規，確認它抓得到。
+
+兩項一開始沒抓到：
+
+- **中文註解檢查抓不到任何東西。** 原因是這台機器的 `grep` 其實是 **ugrep**，看得懂
+  `\x{4e00}-\x{9fff}`；GNU grep 看不懂，會把它當普通字元。也就是說這個檢查在本機「通過」是假的，
+  換一台機器則永遠通過。改用 Python 實作後，注入 `// 這是中文註解` 立刻被抓到。
+- **測試數字檢查被跳過**，因為副本裡沒有 `build` 目錄。在有 build 的環境下注入 `999 test functions`，
+  正確報出 `README.md claims 999 test functions but there are 140`。
+
+commit-msg 檢查同樣實測：`隨便寫的中文訊息`、`Feat: Add something.`、`merge: something` 三種都被擋，
+`feat: add something` 通過。
+
+### 給 agent 讀的檔
+
+- `AGENTS.md` —— 慣例、三層檢查、以及「綠燈測試沒抓到的四個真實缺陷」與 Qt rich-text 陷阱清單。
+  重點那句是：**改任何視覺的東西就 dump 截圖出來看**（`MD_E2E_DUMP=/tmp/md`），
+  並且斷言要釘死實際值，不要用 `QVERIFY(contrast > 4.5)` 這種弱斷言。
+- `CLAUDE.md`（repo 根目錄）—— 只有指標，指向 `AGENTS.md`，因為 Claude Code 會自動載入它。
