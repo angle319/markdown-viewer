@@ -44,10 +44,29 @@ mermaid 支援需要：
 npm i -g @mermaid-js/mermaid-cli
 ```
 
+## 安裝
+
+執行檔叫 `mkdv`。裝進 `~/.local` 不需要 root，而 `~/.local/bin` 在多數桌面環境已經在 `PATH` 上：
+
+```
+./build.sh
+cmake --install build --prefix ~/.local
+```
+
+會放好 `~/.local/bin/mkdv` 與桌面項目 `~/.local/share/applications/mkdv.desktop`，
+所以 `.md` 檔也可以從檔案管理員直接開。要全系統安裝就用
+`sudo cmake --install build --prefix /usr/local`。
+
+要移除就刪掉那兩個檔案；CMake 沒有產生 uninstall target。
+
+target 與程式內部名稱仍然是 `markdown-tool`——設定目錄 `~/.config/markdown-tool` 已經在用了，
+改名會讓既有設定失聯。
+
 ## 使用
 
 ```
-./build/markdown-tool docs/sample.md
+mkdv docs/sample.md          # 已安裝
+./build/mkdv docs/sample.md  # 直接用建置產物
 ```
 
 | 快捷鍵 | 動作 |

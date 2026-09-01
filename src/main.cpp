@@ -19,7 +19,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("markdown-tool"));
     QApplication::setOrganizationName(QStringLiteral("markdown-tool"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral(MD_VERSION));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

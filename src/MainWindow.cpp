@@ -330,7 +330,7 @@ void MainWindow::buildMenus()
     connect(helpMenu->addAction(QStringLiteral("關於")), &QAction::triggered, this, [this] {
         QMessageBox::information(
             this, QStringLiteral("關於 markdown-tool"),
-            QStringLiteral("markdown-tool v0.2\n\n"
+            QStringLiteral("markdown-tool v" MD_VERSION "\n\n"
                            "md4c + QTextBrowser，無瀏覽器引擎。\n"
                            "mermaid 由外部 mmdc 渲染後快取為 PNG。\n\n"
                            "mermaid 渲染器: %1")

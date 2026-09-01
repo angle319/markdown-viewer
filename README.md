@@ -46,10 +46,30 @@ Mermaid support additionally needs:
 npm i -g @mermaid-js/mermaid-cli
 ```
 
+## Install
+
+The executable is named `mkdv`. Installing into `~/.local` needs no root, and
+`~/.local/bin` is already on `PATH` on most desktops:
+
+```
+./build.sh
+cmake --install build --prefix ~/.local
+```
+
+That places `~/.local/bin/mkdv` and a desktop entry at
+`~/.local/share/applications/mkdv.desktop`, so `.md` files can also be opened from a file manager.
+For a system-wide install use `sudo cmake --install build --prefix /usr/local`.
+
+To uninstall, delete those two files; CMake writes no uninstall target.
+
+The target and the application name stay `markdown-tool` — the settings directory
+`~/.config/markdown-tool` is already in use, and renaming it would orphan existing settings.
+
 ## Usage
 
 ```
-./build/markdown-tool docs/sample.md
+mkdv docs/sample.md          # installed
+./build/mkdv docs/sample.md  # straight from the build directory
 ```
 
 | Shortcut | Action |

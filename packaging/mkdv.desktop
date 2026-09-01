@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=mkdv
+GenericName=Markdown Viewer
+Comment=Minimal markdown viewer (md4c + QTextBrowser, no browser engine)
+Exec=mkdv %f
+Icon=text-markdown
+Terminal=false
+Categories=Office;Viewer;Utility;
+MimeType=text/markdown;text/x-markdown;

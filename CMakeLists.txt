@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(markdown_tool VERSION 0.1.0 LANGUAGES C CXX)
+project(markdown_tool VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -58,9 +58,22 @@ if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
     )
     target_include_directories(mdgui PUBLIC src)
     target_link_libraries(mdgui PUBLIC mdcore Qt6::Widgets Qt6::Svg)
+    # 版本字串只有一個來源: 上面的 project(VERSION)。
+    # 之前 --version 說 0.1.0、關於框說 v0.2、README 說 v0.2, 三邊各寫各的。
+    target_compile_definitions(mdgui PUBLIC MD_VERSION="${PROJECT_VERSION}")
 
     add_executable(markdown-tool src/main.cpp)
     target_link_libraries(markdown-tool PRIVATE mdgui)
+
+    # 執行檔叫 mkdv, 但 target 與 QApplication 的 applicationName 仍是 markdown-tool:
+    # 設定目錄 ~/.config/markdown-tool 已經在用, 改名會讓既有設定失聯。
+    set_target_properties(markdown-tool PROPERTIES OUTPUT_NAME mkdv)
+
+    # 安裝: cmake --install build --prefix ~/.local
+    include(GNUInstallDirs)
+    install(TARGETS markdown-tool RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    install(FILES packaging/mkdv.desktop
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
 else()
     set(MD_GUI_AVAILABLE FALSE)
     message(WARNING
