@@ -51,6 +51,10 @@ npm i -g @mermaid-js/mermaid-cli
 | 快捷鍵 | 動作 |
 |---|---|
 | `Ctrl+L` | **聚焦路徑列**（全選，可直接覆寫） |
+| `Ctrl+W` | 關閉分頁 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 下一個／上一個分頁 |
+| `Alt+1`…`Alt+9` | 跳到第 N 個分頁 |
+| `Ctrl+Shift+1`…`4` | 比較欄數（1 = 關閉比較）|
 | `Ctrl+O` | 用檔案對話框開啟 |
 | `F5` | 重新載入 |
 | `F9` | 側邊欄顯示／隱藏 |
@@ -69,6 +73,17 @@ npm i -g @mermaid-js/mermaid-cli
 - 自動完成由 `QFileSystemModel` 提供
 - `Esc` 還原成目前檔案的路徑並把焦點交回內容區
 - 路徑不存在時只在狀態列說明，不會關掉目前開著的文件
+
+### 分頁與比較模式
+
+多個檔案以分頁並存，分頁可拖曳排序。**比較模式**從選單選 2/3/4 欄，
+會把「從目前分頁起算連續 N 個」並排；右邊不夠時視窗往左滑，所以分頁數 >= N
+就一定顯示滿欄。要換比較對象就切分頁或拖動分頁順序 —— 不需要另外一套勾選機制。
+
+比較模式**不同步捲動、也不標示差異**，就是單純並排。
+
+連結導航**在同一個分頁內換檔**，不開新分頁：像 `INDEX.md` 那種有幾十個連結的
+索引頁，每點一次新增一個分頁很快就爆掉。要另開分頁請用路徑列、檔案樹或拖曳。
 
 ### 拖曳
 
@@ -176,7 +191,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-108 個測試函式、7 個套件：
+124 個測試函式、8 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -187,6 +202,7 @@ ctest --test-dir build --output-on-failure
 | theme | 16 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
 | e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
 | e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
+| e2e_tabs | 16 | 分頁、比較模式、各分頁獨立監看、全域操作 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。

@@ -1,17 +1,17 @@
 #pragma once
 
 #include "Theme.h"
-#include "core/Document.h"
 
 #include <QMainWindow>
 
-class FileWatcher;
-class IRenderBackend;
+class DocumentArea;
+class DocumentView;
 class MermaidCache;
-class PathBar;
 class MmdcRenderer;
+class PathBar;
 class Sidebar;
 class QAction;
+class QActionGroup;
 class QLabel;
 class QSplitter;
 
@@ -23,7 +23,12 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
 
+    /// 開檔。已開過的檔案會切到既有分頁，不會重複開。
     bool openFile(const QString &path);
+
+    /// 作用中的分頁；沒有任何分頁時回傳 nullptr。
+    DocumentView *activeView() const;
+    DocumentArea *area() const { return m_area; }
 
     /// 從一組拖入的 URL 挑出第一個能處理的本機路徑（markdown 檔優先，其次資料夾）。
     /// 純邏輯，公開以便單元測試。
@@ -51,32 +56,30 @@ private Q_SLOTS:
     void onReloadTriggered();
     void onLinkActivated(const QUrl &url);
     void focusPathBar();
+    /// 作用中分頁換了：標題、路徑列、TOC 都要跟上
+    void syncToActiveView();
 
 private:
     void buildUi();
     void buildMenus();
     void setMode(Theme::Mode mode);
-    void reparse(bool preserveScroll);
+    void setCompareColumns(int columns);
     void loadSettings();
     void saveSettings();
     void updateStatus(const QString &transient = QString());
 
     Sidebar *m_sidebar = nullptr;
     QSplitter *m_splitter = nullptr;
-    IRenderBackend *m_backend = nullptr;
+    DocumentArea *m_area = nullptr;
     MmdcRenderer *m_renderer = nullptr;
     MermaidCache *m_cache = nullptr;
-    FileWatcher *m_watcher = nullptr;
 
     PathBar *m_pathBar = nullptr;
     QAction *m_actSidebar = nullptr;
     QAction *m_actWhite = nullptr;
     QAction *m_actBlack = nullptr;
+    QActionGroup *m_compareGroup = nullptr;
     QLabel *m_statusRight = nullptr;
 
-    QString m_path;
-    QString m_markdown;
-    Document m_doc;
     Theme::Mode m_mode = Theme::Light;
-    bool m_degradeNoticeShown = false;
 };

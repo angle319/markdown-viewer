@@ -569,3 +569,80 @@ extension（body 16px）：
 
 **誠實記錄**：真正的 X11 拖放動作沒有被自動化測試涵蓋（這台沒有 xdotool
 之類的工具可以合成拖放序列），需要人工驗。
+
+## 18. 多文件：分頁與比較模式（2026-09-01，branch `feat/multi-document`）
+
+使用者的兩個需求：分頁開多份 markdown、分割畫面並排比較 2–4 份。
+決策：**一列分頁 + 比較模式**（非 VS Code 那種編輯器群組）、**不同步捲動**、
+**純並排不做 diff**。
+
+### 18.1 前置重構
+
+兩個功能需要同一個前置動作：把「單一文件的狀態」從 MainWindow 抽出來。
+原本 `m_path` / `m_markdown` / `m_doc` / `m_backend` / `m_watcher` 都掛在
+MainWindow 上，結構上只能開一份。
+
+- `DocumentView`：一份文件的完整狀態與畫面（path、原始碼、Document、
+  render backend、FileWatcher）。`MermaidCache` 由外部共用而非每份各持一份 ——
+  它的 key 是內容雜湊，不同文件裡相同的圖表本來就該共用。
+- `DocumentArea`：分頁列 + 比較模式的容器。
+
+重構完成時既有的 108 個測試全數通過，這是安全網。
+
+### 18.2 DocumentArea 的兩個設計選擇
+
+**所有 DocumentView 常駐同一個 QSplitter，靠 setVisible() 決定顯示哪幾個。**
+切換分頁與進出比較模式都不需要 reparent —— 把 widget 在容器之間搬移會丟掉
+捲動位置與焦點。
+
+**分頁順序的唯一真實來源是 QTabBar**：每個 tab 的 `tabData` 存對應的
+DocumentView 指標，所以使用者拖曳排序後不需要同步任何平行清單。
+
+比較模式顯示「從目前分頁起算連續 N 個」，右邊不夠時視窗往左滑
+（`start = clamp(min(current, count - columns))`），所以分頁數 >= N 時一定滿欄。
+
+### 18.3 踩到的坑：隱藏的 widget 不會排版
+
+第一版 `DocumentArea::openFile()` 是「建立 view（隱藏）→ 載入檔案 → 掛上分頁 →
+顯示」。結果所有圖片的尺寸都是 0。
+
+原因是隱藏的 widget 不會觸發 QTextDocument 排版，`loadResource()` 就不會被呼叫，
+`applyImageSizing()` 拿不到任何邏輯尺寸。
+
+兩處修正：
+1. 順序改成「掛上分頁並顯示 → 再載入檔案」。
+2. `applyImageSizing()` 加防禦：若某張圖沒有記錄到尺寸，主動呼叫
+   `doc->resource()` 逼 `loadResource` 跑一次。
+
+另一個相關的坑：`DocumentView` 必須自己關掉 `acceptDrops` ——
+分頁是動態建立的，MainWindow 在建構時遍歷子 widget 抓不到之後才出現的 view。
+
+### 18.4 連結導航留在同一分頁
+
+點連結若開新分頁，`INDEX.md` 那種 64 個連結的索引頁點幾下就爆掉。
+所以連結一律在觸發它的分頁內換檔，由 `linkNavigationStaysInSameTab()` 盯住。
+要另開分頁請用路徑列、檔案樹或拖曳。
+
+### 18.5 狀態列的錯誤比值
+
+比較模式截圖時發現狀態列出現「mermaid 3/2 產生中」—— 分子是全域佇列長度
+（三個分頁共用一個 MermaidCache），分母是當前文件的圖表數，比出來沒有意義。
+改成分開顯示：當前文件「mermaid N 張」，全域佇列「產生中 M 張」。
+
+### 18.6 記憶體
+
+| 情境 | PSS | RSS |
+|---|---|---|
+| 1 個分頁（sample.md） | 41.6 MB | 87.1 MB |
+| 3 個分頁（含 325 cell 的 INDEX.md） | 43.7 MB | 92.2 MB |
+
+**多開分頁的邊際成本比預估小得多** —— 我原本估 4 份會到 60–90MB，實際 3 份只比
+1 份多 2.1MB。Qt 函式庫本身才是大宗，每份 QTextDocument 反而便宜。
+所以「非作用中分頁延遲卸載」這個最佳化目前沒有必要做。
+
+### 18.7 測試
+
+新增 `tests/test_e2e_tabs.cpp`（16 個），總計 **8 個套件、124 個測試函式**。
+涵蓋：重複開檔不重複分頁、分頁標題來源、切分頁同步路徑列與 TOC、關閉最後一個
+分頁的空狀態、拖曳排序、**各分頁獨立監看自己的檔案**、連結留在同分頁、
+比較欄數與滑動視窗、主題與縮放套用到所有分頁。

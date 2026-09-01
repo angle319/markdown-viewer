@@ -45,6 +45,8 @@ if(Qt6Widgets_FOUND AND Qt6Svg_FOUND)
 
     add_library(mdgui STATIC
         src/MainWindow.cpp
+        src/DocumentArea.cpp
+        src/DocumentView.cpp
         src/Sidebar.cpp
         src/TocPanel.cpp
         src/FileBrowserPanel.cpp
@@ -87,7 +89,7 @@ endif()
 
 # e2e: 驅動真正的 MainWindow, 用 offscreen platform 跑
 if(MD_GUI_AVAILABLE)
-    foreach(t theme e2e_viewer e2e_regression)
+    foreach(t theme e2e_viewer e2e_regression e2e_tabs)
         add_executable(test_${t} tests/test_${t}.cpp)
         target_link_libraries(test_${t} PRIVATE mdgui Qt6::Test)
         add_test(NAME ${t} COMMAND test_${t})

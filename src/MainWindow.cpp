@@ -1,37 +1,34 @@
 #include "MainWindow.h"
 
+#include "DocumentArea.h"
+#include "DocumentView.h"
+#include "FileBrowserPanel.h"
 #include "PathBar.h"
 #include "Sidebar.h"
-#include "FileBrowserPanel.h"
 #include "TocPanel.h"
-#include "core/FileWatcher.h"
-#include "core/MarkdownParser.h"
 #include "core/MermaidCache.h"
 #include "core/MmdcRenderer.h"
-#include "render/TextBrowserBackend.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
-#include <QtMath>
 #include <QDesktopServices>
+#include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QMimeData>
-#include <QDir>
-#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
-#include <QVBoxLayout>
 #include <QStatusBar>
-#include <QTextStream>
+#include <QVBoxLayout>
+#include <QtMath>
 
 namespace {
 
@@ -54,7 +51,6 @@ MainWindow::MainWindow(QWidget *parent)
     // （實測 sample.md 的兩張圖就差約 10MB PSS）。
     m_renderer->setPngScale(qMax(1, qCeil(qApp->devicePixelRatio())));
     m_cache = new MermaidCache(m_renderer, this);
-    m_watcher = new FileWatcher(this);
 
     buildUi();
     buildMenus();
@@ -64,15 +60,19 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() = default;
 
+DocumentView *MainWindow::activeView() const
+{
+    return m_area ? m_area->activeView() : nullptr;
+}
+
 void MainWindow::buildUi()
 {
     m_sidebar = new Sidebar(this);
-    auto *backend = new TextBrowserBackend(m_cache, this);
-    m_backend = backend;
+    m_area = new DocumentArea(m_cache, this);
 
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_splitter->addWidget(m_sidebar);
-    m_splitter->addWidget(m_backend->widget());
+    m_splitter->addWidget(m_area);
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
     m_splitter->setChildrenCollapsible(false);
@@ -87,37 +87,31 @@ void MainWindow::buildUi()
     box->addWidget(m_splitter, 1);
     setCentralWidget(central);
 
-    connect(m_pathBar, &PathBar::pathSubmitted, this, &MainWindow::onPathSubmitted);
-    connect(m_pathBar, &PathBar::cancelled, this,
-            [this] { m_backend->widget()->setFocus(Qt::OtherFocusReason); });
-
     m_statusRight = new QLabel(this);
     statusBar()->addPermanentWidget(m_statusRight);
 
-    connect(m_sidebar->toc(), &TocPanel::anchorActivated,
-            this, [this](const QString &a) { m_backend->scrollToAnchor(a); });
-    connect(m_backend, &IRenderBackend::currentTocIndexChanged,
-            m_sidebar->toc(), &TocPanel::highlightIndex);
-    connect(m_backend, &IRenderBackend::linkActivated,
-            this, &MainWindow::onLinkActivated);
+    connect(m_pathBar, &PathBar::pathSubmitted, this, &MainWindow::onPathSubmitted);
+    connect(m_pathBar, &PathBar::cancelled, this, [this] {
+        if (DocumentView *v = activeView())
+            v->setFocus(Qt::OtherFocusReason);
+    });
+
+    connect(m_sidebar->toc(), &TocPanel::anchorActivated, this, [this](const QString &a) {
+        if (DocumentView *v = activeView())
+            v->scrollToAnchor(a);
+    });
     connect(m_sidebar->files(), &FileBrowserPanel::fileActivated,
             this, [this](const QString &p) { openFile(p); });
 
-    connect(m_watcher, &FileWatcher::fileChanged, this, [this] {
-        QFile f(m_path);
-        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-            return;
-        QTextStream in(&f);
-        in.setEncoding(QStringConverter::Utf8);
-        m_markdown = in.readAll();
-        reparse(true);
-        updateStatus(QStringLiteral("已重新載入"));
-    });
+    connect(m_area, &DocumentArea::activeViewChanged, this, &MainWindow::syncToActiveView);
+    connect(m_area, &DocumentArea::activeDocumentChanged, this, &MainWindow::syncToActiveView);
+    connect(m_area, &DocumentArea::currentTocIndexChanged,
+            m_sidebar->toc(), &TocPanel::highlightIndex);
+    connect(m_area, &DocumentArea::linkActivated, this, &MainWindow::onLinkActivated);
+    connect(m_area, &DocumentArea::statusMessage, this,
+            [this](const QString &t) { updateStatus(t); });
+    connect(m_area, &DocumentArea::tabsChanged, this, [this] { updateStatus(); });
 
-    connect(m_cache, &MermaidCache::rendered, this, [this](const QString &key, const QString &) {
-        m_backend->mermaidReady(key);
-        updateStatus();
-    });
     connect(m_cache, &MermaidCache::failed, this, [this](const QString &, const QString &err) {
         updateStatus(QStringLiteral("mermaid 渲染失敗: ") + err.left(160));
     });
@@ -128,7 +122,7 @@ void MainWindow::buildUi()
     // 拖曳開檔。QTextBrowser 與側邊欄的 view 預設會吃掉 drop 事件，
     // 關掉它們的 acceptDrops 讓事件冒泡到 MainWindow。
     setAcceptDrops(true);
-    m_backend->widget()->setAcceptDrops(false);
+    m_area->setAcceptDrops(false);
     m_sidebar->setAcceptDrops(false);
     for (QWidget *w : m_sidebar->findChildren<QWidget *>())
         w->setAcceptDrops(false);
@@ -192,6 +186,33 @@ void MainWindow::buildMenus()
     connect(actReload, &QAction::triggered, this, &MainWindow::onReloadTriggered);
 
     fileMenu->addSeparator();
+
+    auto *actCloseTab = fileMenu->addAction(QStringLiteral("關閉分頁"));
+    actCloseTab->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
+    connect(actCloseTab, &QAction::triggered, this, [this] { m_area->closeActiveTab(); });
+    addAction(actCloseTab);
+
+    auto *actNext = fileMenu->addAction(QStringLiteral("下一個分頁"));
+    actNext->setShortcuts({ QKeySequence(Qt::CTRL | Qt::Key_Tab),
+                            QKeySequence(Qt::CTRL | Qt::Key_PageDown) });
+    connect(actNext, &QAction::triggered, this, [this] { m_area->nextTab(); });
+    addAction(actNext);
+
+    auto *actPrev = fileMenu->addAction(QStringLiteral("上一個分頁"));
+    actPrev->setShortcuts({ QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Tab),
+                            QKeySequence(Qt::CTRL | Qt::Key_PageUp) });
+    connect(actPrev, &QAction::triggered, this, [this] { m_area->previousTab(); });
+    addAction(actPrev);
+
+    // Alt+1..9 直接跳分頁（Alt+Shift+1/2 是主題，不衝突）
+    for (int i = 1; i <= 9; ++i) {
+        auto *jump = new QAction(this);
+        jump->setShortcut(QKeySequence(Qt::ALT | Qt::Key(Qt::Key_0 + i)));
+        connect(jump, &QAction::triggered, this, [this, i] { m_area->setActiveIndex(i - 1); });
+        addAction(jump);
+    }
+
+    fileMenu->addSeparator();
     auto *actQuit = fileMenu->addAction(QStringLiteral("結束"));
     actQuit->setShortcut(QKeySequence::Quit);
     connect(actQuit, &QAction::triggered, this, &QWidget::close);
@@ -226,32 +247,60 @@ void MainWindow::buildMenus()
     connect(actToggleTheme, &QAction::triggered, this,
             [this] { setMode(m_mode == Theme::Dark ? Theme::Light : Theme::Dark); });
 
+    // ---- 比較模式 ----
+    viewMenu->addSeparator();
+    m_compareGroup = new QActionGroup(this);
+    m_compareGroup->setExclusive(true);
+
+    struct CompareItem {
+        const char *text;
+        int columns;
+        Qt::Key key;
+    };
+    static const CompareItem items[] = {
+        { "單欄（關閉比較）", 1, Qt::Key_1 },
+        { "比較 2 欄", 2, Qt::Key_2 },
+        { "比較 3 欄", 3, Qt::Key_3 },
+        { "比較 4 欄", 4, Qt::Key_4 },
+    };
+    for (const CompareItem &item : items) {
+        auto *act = viewMenu->addAction(QString::fromUtf8(item.text));
+        act->setCheckable(true);
+        act->setChecked(item.columns == 1);
+        act->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | item.key));
+        act->setData(item.columns);
+        m_compareGroup->addAction(act);
+        connect(act, &QAction::triggered, this,
+                [this, cols = item.columns] { setCompareColumns(cols); });
+        addAction(act);
+    }
+
+    viewMenu->addSeparator();
+    auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
+    actZoomIn->setShortcut(QKeySequence::ZoomIn);
+    connect(actZoomIn, &QAction::triggered, this, [this] { m_area->zoomIn(); });
+
+    auto *actZoomOut = viewMenu->addAction(QStringLiteral("縮小"));
+    actZoomOut->setShortcut(QKeySequence::ZoomOut);
+    connect(actZoomOut, &QAction::triggered, this, [this] { m_area->zoomOut(); });
+
+    auto *actZoomReset = viewMenu->addAction(QStringLiteral("原始大小"));
+    actZoomReset->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+    connect(actZoomReset, &QAction::triggered, this, [this] { m_area->resetZoom(); });
+
     viewMenu->addSeparator();
     auto *actFocusPath = viewMenu->addAction(QStringLiteral("聚焦路徑列"));
     actFocusPath->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
     connect(actFocusPath, &QAction::triggered, this, &MainWindow::focusPathBar);
     addAction(actFocusPath);
 
-    viewMenu->addSeparator();
-    auto *actZoomIn = viewMenu->addAction(QStringLiteral("放大"));
-    actZoomIn->setShortcut(QKeySequence::ZoomIn);
-    connect(actZoomIn, &QAction::triggered, this, [this] { m_backend->zoomIn(); });
-
-    auto *actZoomOut = viewMenu->addAction(QStringLiteral("縮小"));
-    actZoomOut->setShortcut(QKeySequence::ZoomOut);
-    connect(actZoomOut, &QAction::triggered, this, [this] { m_backend->zoomOut(); });
-
-    auto *actZoomReset = viewMenu->addAction(QStringLiteral("原始大小"));
-    actZoomReset->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
-    connect(actZoomReset, &QAction::triggered, this, [this] { m_backend->resetZoom(); });
-
     auto *helpMenu = menuBar()->addMenu(QStringLiteral("說明(&H)"));
     connect(helpMenu->addAction(QStringLiteral("關於")), &QAction::triggered, this, [this] {
         QMessageBox::information(
             this, QStringLiteral("關於 markdown-tool"),
-            QStringLiteral("markdown-tool v0.1\n\n"
+            QStringLiteral("markdown-tool v0.2\n\n"
                            "md4c + QTextBrowser，無瀏覽器引擎。\n"
-                           "mermaid 由外部 mmdc 渲染後快取為 SVG。\n\n"
+                           "mermaid 由外部 mmdc 渲染後快取為 PNG。\n\n"
                            "mermaid 渲染器: %1")
                 .arg(m_cache->rendererAvailable() ? m_renderer->rendererId()
                                                   : QStringLiteral("未安裝")));
@@ -260,71 +309,44 @@ void MainWindow::buildMenus()
 
 bool MainWindow::openFile(const QString &path)
 {
-    const QFileInfo fi(path);
-    if (!fi.isFile()) {
-        updateStatus(QStringLiteral("找不到檔案: ") + path);
+    DocumentView *view = m_area->openFile(path);
+    if (!view)
         return false;
-    }
 
-    QFile f(fi.absoluteFilePath());
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, QStringLiteral("開啟失敗"),
-                             QStringLiteral("無法讀取 %1\n%2").arg(path, f.errorString()));
-        return false;
-    }
-
-    QTextStream in(&f);
-    in.setEncoding(QStringConverter::Utf8);
-    m_markdown = in.readAll();
-    m_path = fi.absoluteFilePath();
-
-    reparse(false);
-    m_watcher->watch(m_path);
-    m_pathBar->setPath(m_path);
-
+    const QFileInfo fi(view->path());
     if (m_sidebar->files()->root().isEmpty()
-        || !m_path.startsWith(m_sidebar->files()->root()))
+        || !view->path().startsWith(m_sidebar->files()->root()))
         m_sidebar->files()->setRoot(fi.absolutePath());
-    m_sidebar->files()->selectFile(m_path);
+    m_sidebar->files()->selectFile(view->path());
 
-    updateStatus();
+    syncToActiveView();
     return true;
 }
 
-void MainWindow::reparse(bool preserveScroll)
+void MainWindow::syncToActiveView()
 {
-    MarkdownParser::Options opt;
-    // mmdc 不在就別產生佔位圖，直接把 mermaid 當程式碼區塊顯示
-    opt.mermaidEnabled = m_cache->rendererAvailable();
-    opt.darkTheme = (m_mode == Theme::Dark);
+    DocumentView *view = activeView();
 
-    const int scroll = preserveScroll ? m_backend->scrollValue() : 0;
-
-    m_doc = MarkdownParser::parse(m_markdown, QFileInfo(m_path).absolutePath(), opt);
-    m_backend->setTheme(m_mode);
-
-    // TOC 必須先建好再設定文件：setDocument() 會立刻發出 currentTocIndexChanged，
-    // 若此時 TocPanel 還在舊資料（或稍後才被 setToc 清空），高亮就會被吃掉。
-    m_sidebar->toc()->setToc(m_doc.toc);
-    m_backend->setDocument(m_doc);
-
-    if (preserveScroll)
-        m_backend->setScrollValue(scroll);
-
-    const QString title = m_doc.title.isEmpty() ? QFileInfo(m_path).fileName() : m_doc.title;
-    setWindowTitle(m_path.isEmpty() ? QStringLiteral("markdown-tool")
-                                    : QStringLiteral("%1 — markdown-tool").arg(title));
-
-    if (!m_doc.mermaid.isEmpty() && !m_cache->rendererAvailable() && !m_degradeNoticeShown) {
-        m_degradeNoticeShown = true;
-        updateStatus(QStringLiteral("未找到 mmdc，mermaid 以原始碼顯示。"
-                                    "安裝: npm i -g @mermaid-js/mermaid-cli"));
+    if (!view) {
+        setWindowTitle(QStringLiteral("markdown-tool"));
+        m_pathBar->setPath(QString());
+        m_sidebar->toc()->setToc({});
+        updateStatus();
+        return;
     }
+
+    setWindowTitle(QStringLiteral("%1 — markdown-tool").arg(view->title()));
+    m_pathBar->setPath(view->path());
+    m_sidebar->toc()->setToc(view->document().toc);
+    updateStatus();
 }
 
 void MainWindow::onOpenTriggered()
 {
-    const QString start = m_path.isEmpty() ? QDir::homePath() : QFileInfo(m_path).absolutePath();
+    DocumentView *view = activeView();
+    const QString start = view && !view->path().isEmpty()
+                              ? QFileInfo(view->path()).absolutePath()
+                              : QDir::homePath();
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("開啟 markdown"), start,
         QStringLiteral("Markdown (*.md *.markdown *.mdx *.mdc *.mkd *.txt);;所有檔案 (*)"));
@@ -334,9 +356,8 @@ void MainWindow::onOpenTriggered()
 
 void MainWindow::onReloadTriggered()
 {
-    if (m_path.isEmpty())
-        return;
-    openFile(m_path);
+    if (DocumentView *view = activeView(); view && !view->path().isEmpty())
+        view->openFile(view->path());
 }
 
 void MainWindow::setMode(Theme::Mode mode)
@@ -346,12 +367,7 @@ void MainWindow::setMode(Theme::Mode mode)
 
     m_mode = mode;
     (mode == Theme::Dark ? m_actBlack : m_actWhite)->setChecked(true);
-
-    // 語法高亮的配色是在產 HTML 時決定的，所以主題切換必須重新解析
-    if (!m_markdown.isEmpty())
-        reparse(true);
-    else
-        m_backend->setTheme(m_mode);
+    m_area->setTheme(mode);
 
     // 套到整個 application：選單列、分頁標籤、對話框都要跟著換，
     // 只設在 MainWindow 上的話 QMenuBar 之類的仍會用預設淺色系。
@@ -360,6 +376,15 @@ void MainWindow::setMode(Theme::Mode mode)
     setPalette(pal);
     m_pathBar->setPalette(pal);
     m_sidebar->setPalette(pal);
+}
+
+void MainWindow::setCompareColumns(int columns)
+{
+    m_area->setCompareColumns(columns);
+    for (QAction *a : m_compareGroup->actions())
+        if (a->data().toInt() == m_area->compareColumns())
+            a->setChecked(true);
+    updateStatus();
 }
 
 void MainWindow::focusPathBar()
@@ -396,24 +421,44 @@ void MainWindow::onPathSubmitted(const QString &path)
 
 void MainWindow::onLinkActivated(const QUrl &url)
 {
+    DocumentView *view = activeView();
+    const QString basePath = view ? view->path() : QString();
+
     // 純錨點
     if (!url.fragment().isEmpty() && url.path().isEmpty()) {
-        m_backend->scrollToAnchor(url.fragment());
+        if (view)
+            view->scrollToAnchor(url.fragment());
         return;
     }
     const QString raw = url.toString();
     if (raw.startsWith(QLatin1Char('#'))) {
-        m_backend->scrollToAnchor(raw.mid(1));
+        if (view)
+            view->scrollToAnchor(raw.mid(1));
         return;
     }
 
+    // 連結導航**在同一個分頁內**換檔，不開新分頁：像 INDEX.md 那種有幾十個
+    // 連結的索引頁，每點一次就新增一個分頁的話很快就爆掉。
+    // 要另開分頁請用路徑列、檔案樹或拖曳。
+    const auto navigateInPlace = [this, view](const QString &local) {
+        if (!view) {
+            openFile(local);
+            return;
+        }
+        if (view->openFile(local)) {
+            const QFileInfo fi(local);
+            m_sidebar->files()->selectFile(fi.absoluteFilePath());
+            syncToActiveView();
+        }
+    };
+
     // 相對路徑：對目前檔案所在目錄解析
-    if (url.isRelative() && !m_path.isEmpty()) {
+    if (url.isRelative() && !basePath.isEmpty()) {
         const QString local =
-            QDir(QFileInfo(m_path).absolutePath()).absoluteFilePath(url.path());
+            QDir(QFileInfo(basePath).absolutePath()).absoluteFilePath(url.path());
         if (QFileInfo::exists(local)) {
             if (looksLikeMarkdown(local))
-                openFile(local);
+                navigateInPlace(local);
             else
                 QDesktopServices::openUrl(QUrl::fromLocalFile(local));
             return;
@@ -423,7 +468,7 @@ void MainWindow::onLinkActivated(const QUrl &url)
     if (url.isLocalFile()) {
         const QString local = url.toLocalFile();
         if (looksLikeMarkdown(local) && QFileInfo::exists(local))
-            openFile(local);
+            navigateInPlace(local);
         else
             QDesktopServices::openUrl(url);
         return;
@@ -437,15 +482,25 @@ void MainWindow::updateStatus(const QString &transient)
     if (!transient.isEmpty())
         statusBar()->showMessage(transient, 8000);
 
+    DocumentView *view = activeView();
     QStringList parts;
-    if (!m_path.isEmpty())
-        parts << QFileInfo(m_path).fileName();
-    parts << QStringLiteral("%1 段落").arg(m_doc.toc.size());
-    if (!m_doc.mermaid.isEmpty()) {
-        const int pending = m_cache->pendingCount();
-        parts << (pending > 0 ? QStringLiteral("mermaid %1/%2 產生中")
-                                    .arg(pending).arg(m_doc.mermaid.size())
-                              : QStringLiteral("mermaid %1 張").arg(m_doc.mermaid.size()));
+
+    if (m_area->count() > 1)
+        parts << QStringLiteral("%1/%2 分頁").arg(m_area->activeIndex() + 1).arg(m_area->count());
+    if (m_area->compareColumns() > 1)
+        parts << QStringLiteral("比較 %1 欄").arg(m_area->compareColumns());
+
+    if (view) {
+        parts << QFileInfo(view->path()).fileName();
+        parts << QStringLiteral("%1 段落").arg(view->document().toc.size());
+        if (!view->document().mermaid.isEmpty())
+            parts << QStringLiteral("mermaid %1 張").arg(view->document().mermaid.size());
+    }
+
+    // 佇列是全域的（所有分頁共用一個 MermaidCache），所以不能拿它跟
+    // 當前文件的圖表數相除 —— 三個分頁一起排隊時會顯示出「3/2」這種數字。
+    if (const int pending = m_cache->pendingCount(); pending > 0) {
+        parts << QStringLiteral("產生中 %1 張").arg(pending);
     }
     m_statusRight->setText(parts.join(QStringLiteral("   |   ")));
 }
@@ -479,6 +534,8 @@ void MainWindow::loadSettings()
     const QString lastRoot = s.value(QStringLiteral("files/root")).toString();
     if (!lastRoot.isEmpty() && QFileInfo(lastRoot).isDir())
         m_sidebar->files()->setRoot(lastRoot);
+
+    setCompareColumns(s.value(QStringLiteral("view/compareColumns"), 1).toInt());
 }
 
 void MainWindow::saveSettings()
@@ -489,13 +546,19 @@ void MainWindow::saveSettings()
     s.setValue(QStringLiteral("view/dark"), m_mode == Theme::Dark);
     s.setValue(QStringLiteral("view/sidebar"), m_sidebar->isVisible());
     s.setValue(QStringLiteral("view/sidebarTab"), m_sidebar->currentIndex());
+    s.setValue(QStringLiteral("view/compareColumns"), m_area->compareColumns());
 
     QVariantList sizes;
     for (int v : m_splitter->sizes())
         sizes << v;
     s.setValue(QStringLiteral("window/splitter"), sizes);
     s.setValue(QStringLiteral("files/root"), m_sidebar->files()->root());
-    s.setValue(QStringLiteral("files/lastFile"), m_path);
+
+    // 分頁清單與作用中索引，下次啟動還原
+    s.setValue(QStringLiteral("files/openTabs"), m_area->openPaths());
+    s.setValue(QStringLiteral("files/activeTab"), m_area->activeIndex());
+    DocumentView *view = activeView();
+    s.setValue(QStringLiteral("files/lastFile"), view ? view->path() : QString());
 }
 
 void MainWindow::closeEvent(QCloseEvent *e)

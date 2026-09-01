@@ -20,6 +20,7 @@
 #include <QTreeView>
 #include <QTreeWidget>
 
+#include "DocumentView.h"
 #include "MainWindow.h"
 #include "PathBar.h"
 #include "Theme.h"
@@ -71,7 +72,13 @@ private:
     void writeFile(const QString &name, const QString &content) const;
     QString fixturePath(const QString &name) const;
 
-    QTextBrowser *browser() const { return m_win->findChild<QTextBrowser *>(); }
+    QTextBrowser *browser() const
+    {
+        // 多分頁之後不能用 m_win->findChild —— 那會抓到第一個建立的 view，
+        // 不一定是作用中的那個
+        DocumentView *v = m_win->activeView();
+        return v ? v->findChild<QTextBrowser *>() : nullptr;
+    }
     QTreeWidget *tocTree() const { return m_win->findChild<QTreeWidget *>(); }
     QTabWidget *sidebar() const { return m_win->findChild<QTabWidget *>(); }
     QTreeView *fileTree() const;

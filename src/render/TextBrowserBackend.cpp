@@ -245,6 +245,12 @@ public:
 
                 QTextImageFormat fmt = f.charFormat().toImageFormat();
                 const QString url = fmt.name();
+
+                // 若排版還沒跑過（例如 widget 當時是隱藏的），loadResource 就
+                // 沒被呼叫過，這裡主動要一次把尺寸補上。
+                if (!m_logicalSize.contains(url) && !m_known.contains(url))
+                    doc->resource(QTextDocument::ImageResource, QUrl(url));
+
                 const QSize logical = m_logicalSize.value(url);
 
                 if (logical.isValid() && !logical.isEmpty()) {
