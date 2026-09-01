@@ -208,7 +208,7 @@ xcb QPA 的 GL 整合會把 Mesa 的 llvmpipe 連帶 `libLLVM` 拉進行程，�
 ctest --test-dir build --output-on-failure
 ```
 
-138 個測試函式、8 個套件：
+136 個測試函式、8 個套件：
 
 | 套件 | 函式數 | 內容 |
 |---|---|---|
@@ -216,10 +216,10 @@ ctest --test-dir build --output-on-failure
 | codehighlighter | 8 | 各語言著色、退化、未閉合字串 |
 | mermaidcache | 8 | key 敏感度、佇列序列化、degrade 路徑 |
 | mmdc_integration | 9 | 真的跑 mmdc；SVG-vs-PNG 的連線墨水差分 |
-| theme | 18 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code 色相 |
+| theme | 17 | WCAG 對比門檻：配色、palette role、語法高亮、行內 code、分頁狀態 |
 | e2e_viewer | 26 | 驅動真正的 MainWindow；路徑列、主題、拖曳流程 |
 | e2e_regression | 26 | 以 sample.md / headings.md 為語料庫釘住 pipeline 不變式與樣式 |
-| e2e_tabs | 27 | 分頁、分割面板、拖曳分割、面板幾何不變式、各分頁獨立監看 |
+| e2e_tabs | 27 | 分頁、分割面板、拖曳分割、幾何不變式、右鍵選單、獨立監看 |
 
 e2e 用 `QT_QPA_PLATFORM=offscreen` 跑，不需要 X／Wayland。`mmdc` 不在時
 整合測試與 mermaid e2e 會自己 skip，不算失敗。
