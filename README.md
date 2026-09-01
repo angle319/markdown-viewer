@@ -247,6 +247,25 @@ MD_E2E_DUMP=/tmp/shots MD_E2E_DOC=docs/headings.md \
 
 會輸出白／黑兩個主題下的頂端、程式碼、mermaid、表格、對比保護章節共 10 張 PNG。
 
+## 規格文件
+
+`openspec/specs/<domain>/spec.md` 是行為的來源真相，依 OpenSpec 慣例撰寫
+（`### Requirement:` / `#### Scenario:` 搭配 GIVEN/WHEN/THEN）。
+每份都有並排的 `spec.zh-TW.md` 中文版，兩份必須同步更新，
+由 `openspec/check-bilingual.sh` 檢查結構是否一致。
+
+| Domain | 範圍 |
+|---|---|
+| `markdown-parsing` | md4c callback renderer、錨點、語法高亮、Qt 富文字相容性 |
+| `document-rendering` | QTextBrowser 後端、版面、圖片、對比強制、縮放、效能 |
+| `theming` | 白／黑主題、WCAG 對比保證、palette、分頁狀態 |
+| `mermaid-diagrams` | 外部 mmdc 渲染、PNG 而非 SVG 的決定、快取、退化 |
+| `workspace` | 分頁、分割面板、路徑列、側邊欄、檔案監看、拖放、持久化 |
+
+`docs/superpowers/specs/2026-08-31-markdown-tool-design.md` 是**開發過程的紀錄**
+（每一輪的決策、量測數字、踩過的坑），與上面的規格互補：規格說「現在是什麼」，
+設計文件說「為什麼變成這樣」。
+
 ## 狀態
 
 v0.1 功能完成，已在真實 X11 與 offscreen 下驗證。
