@@ -63,9 +63,12 @@ QString Theme::documentStyleSheet(Mode m)
 {
     const Colors &c = colors(m);
 
-    // 標題的 font-size **不在這裡設**，見 Theme::headingPointSize()：
-    // Qt 對 h5/h6 會套用自己的 fontSizeAdjustment，CSS 蓋不掉。
-    // 這裡只留 margin 與顏色（那些 Qt 有正確套用）。
+    // 字級**都不在這裡設**：
+    //  * 標題 —— Qt 對 h5/h6 會套用自己的 fontSizeAdjustment，CSS 蓋不掉，
+    //    改由 applyHeadingScale() 明確設定（見 Theme::headingPointSize）。
+    //  * 正文 —— 實測 `body { font-size }` 對 QTextDocument **完全沒有生效**，
+    //    內文一直是 widget 的系統預設字級。改用 setDefaultFont() 控制。
+    // 這裡只留 margin、行高與顏色（那些 Qt 有正確套用）。
     //
     // 只用 Qt rich-text 支援的 CSS 屬性子集：color、background-color、
     // font-*、margin、padding、text-decoration、以及表格的 background-color。
@@ -76,8 +79,7 @@ QString Theme::documentStyleSheet(Mode m)
     // placeholder 由小到大」依序取代，不是 %N 對應第 N 個引數。少用掉一個編號
     // （例如 %4）就會讓其後全部錯位 —— 這個坑真的踩過，害 code 的底色拿到前景色。
     QString css = QStringLiteral(R"(
-        body { color: @TEXT@; background-color: @BG@; font-size: @BODYPT@pt;
-               line-height: @LH@%; }
+        body { color: @TEXT@; background-color: @BG@; line-height: @LH@%; }
         h1 { margin-top: 24px; margin-bottom: 12px; color: @TEXT@; }
         h2 { margin-top: 28px; margin-bottom: 12px; color: @TEXT@; }
         h3 { margin-top: 24px; margin-bottom: 8px; color: @TEXT@; }
@@ -108,7 +110,6 @@ QString Theme::documentStyleSheet(Mode m)
         { QStringLiteral("@CODE_FG@"), c.codeInline },
         { QStringLiteral("@CODE_BG@"), c.codeInlineBackground },
         { QStringLiteral("@BQ@"), QString::number(BlockquoteIndentPx) },
-        { QStringLiteral("@BODYPT@"), QString::number(BodyPointSize) },
         { QStringLiteral("@LH@"), QString::number(int(LineHeightPercent)) },
     };
     for (const auto &t : tokens)

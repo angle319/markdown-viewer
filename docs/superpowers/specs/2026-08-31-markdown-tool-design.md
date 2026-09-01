@@ -741,3 +741,54 @@ QStackedWidget 裡、只有當前分頁可見、內容落在分頁列下方）�
 
 同時把預設主題改為黑色。連帶要修一支測試 —— 它原本假設啟動是白色主題，
 改成明確先切白色再測切換，不要依賴預設值。
+
+## 21. 字型縮放（2026-09-01，branch `feat/font-zoom`）
+
+使用者要 `Ctrl+` / `Ctrl-` 縮放字型。選單上本來就有「放大／縮小」，
+所以先量它到底有沒有用 —— 結果是三個問題疊在一起。
+
+### 21.1 量到的問題
+
+| | 縮放前 | 縮放 ×2 後 |
+|---|---|---|
+| widget 基準字級 | 9pt | 11pt |
+| 內文 | 9pt | 11pt |
+| H1 | 23pt | **23pt** |
+
+1. **標題完全不縮放。** `applyHeadingScale()`（§15 為了修 H5 比正文小而加的）
+   寫死了 pointSize，`QTextEdit::zoomIn()` 只動 widget 字型，動不到它。
+2. **內文其實是 9pt，不是文件裡寫的 11pt。** stylesheet 的
+   `body { font-size: 11pt }` 對 QTextDocument **完全沒有生效**。
+   §16 之後我一直宣稱正文是 11pt，那是錯的 —— 之前只驗過標題的實際字級，
+   沒驗過正文。
+3. **`Ctrl+=` 沒有綁定。** `QKeySequence::ZoomIn` 在 Linux 上解析成 `Ctrl++`，
+   而 `+` 在一般鍵盤要按 `Ctrl+Shift+=`。使用者按最自然的 `Ctrl+=` 沒有反應 ——
+   這才是「感覺沒有這個功能」的直接原因。
+
+### 21.2 修法
+
+不再用 `QTextEdit::zoomIn()`，改成自己管一個縮放倍率：
+
+- `TextBrowserBackend::setZoom(factor)`，每階 1.1 倍，範圍 0.5×–3×
+- 正文字級 = `Theme::BodyPointSize × factor`，透過 `setDefaultFont()`
+- 標題字級 = `Theme::headingPointSize(level) × factor`
+- 改變倍率後重新套版（不是重新解析 markdown），成本約十幾 ms
+
+`body { font-size }` 這條沒作用的 CSS 一併移除，避免下一個人再被它誤導。
+
+快捷鍵補上 `Ctrl+=`、`Ctrl+Shift+=`、`Ctrl+Plus`（放大）與 `Ctrl+-`、
+`Ctrl+_`（縮小），原本的 `QKeySequence::ZoomIn/Out` 保留。
+
+### 21.3 測試
+
+- `zoomScalesBodyAndHeadingsTogether()`：內文與標題都要放大，**而且比例要一致**
+  （差距 < 2%），reset 要回到原值
+- `zoomIsClampedAndResettable()`：連按 40 次不會超過上限、80 次不會縮到看不見
+- `zoomShortcutsIncludeCtrlEquals()`：直接斷言 `Ctrl+=` 有被綁上 ——
+  這是使用者實際踩到的那一點
+
+另外修正兩支既有測試：它們原本檢查 `browser()->font().pointSizeF()`
+（widget 字型），現在縮放改由文件預設字型控制，改看
+`document()->defaultFont()`。
+
+總計 **8 個套件、139 個測試函式**。
