@@ -15,6 +15,7 @@
 #include <QTextTableCell>
 #include <QTreeWidget>
 
+#include "DocumentView.h"
 #include "MainWindow.h"
 #include "Theme.h"
 #include "core/MarkdownParser.h"
@@ -77,7 +78,13 @@ private slots:
     void dumpScreenshotsIfRequested();
 
 private:
-    QTextBrowser *browser() const { return m_win->findChild<QTextBrowser *>(); }
+    QTextBrowser *browser() const
+    {
+        // 多分頁之後不能用 m_win->findChild —— 那會抓到第一個建立的 view，
+        // 不一定是作用中的那個
+        DocumentView *v = m_win->activeView();
+        return v ? v->findChild<QTextBrowser *>() : nullptr;
+    }
     QAction *actionNamed(const QString &text) const;
     int headingBlockCount() const;
 

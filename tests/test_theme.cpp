@@ -29,6 +29,7 @@ private slots:
 
     void styleSheetHasNoLeftoverPlaceholders();
     void inlineCodeColoursAreReadableAndDistinct();
+    void tabBarStatesAreClearlyDistinct();
     void paletteRolePairsAreReadable();
     void paletteHasNoDefaultLightRolesInBlackTheme();
 
@@ -255,6 +256,48 @@ void TestTheme::inlineCodeColoursAreReadableAndDistinct()
 
         // 也要與正文色不同，否則等於沒標注
         QVERIFY(fg != QColor(c.text));
+    }
+}
+
+void TestTheme::tabBarStatesAreClearlyDistinct()
+{
+    // 使用者回報「tab 反色不夠，不知道 focus 在哪」。
+    // QTabBar 預設的選取狀態只差一點點底色，所以改用 QSS 明確拉開：
+    // 選取中 = 頁面底色 + 正文色 + 粗體 + 頂端強調線；未選取 = 沉一階 + 次要色。
+    for (Theme::Mode m : modes()) {
+        const Theme::Colors &c = Theme::colors(m);
+
+        const double selected = Theme::contrastRatio(QColor(c.text), QColor(c.background));
+        const double unselected = Theme::contrastRatio(QColor(c.muted), QColor(c.tabInactive));
+        QVERIFY2(selected >= Theme::MinBodyTextContrast,
+                 qPrintable(QStringLiteral("%1 選取中分頁的文字對比只有 %2:1")
+                                .arg(Theme::name(m)).arg(selected)));
+        QVERIFY2(unselected >= Theme::MinTextContrast,
+                 qPrintable(QStringLiteral("%1 未選取分頁的文字對比只有 %2:1")
+                                .arg(Theme::name(m)).arg(unselected)));
+
+        // 兩種狀態的底色必須分得出來，否則就是「不知道 focus 在哪」
+        const double states = Theme::contrastRatio(QColor(c.background), QColor(c.tabInactive));
+        QVERIFY2(states >= 1.2,
+                 qPrintable(QStringLiteral("%1 選取／未選取的底色只差 %2，分不出來")
+                                .arg(Theme::name(m)).arg(states)));
+
+        // 選取中的文字要比未選取的更顯眼
+        QVERIFY2(selected > unselected,
+                 qPrintable(QStringLiteral("%1 選取中的文字沒有比未選取的更顯眼")
+                                .arg(Theme::name(m))));
+
+        // 強調線要看得見
+        const double accent = Theme::contrastRatio(QColor(c.link), QColor(c.background));
+        QVERIFY2(accent >= Theme::MinNonTextContrast,
+                 qPrintable(QStringLiteral("%1 分頁強調線看不清楚: %2:1")
+                                .arg(Theme::name(m)).arg(accent)));
+
+        // QSS 要把 token 都換掉
+        const QString qss = Theme::tabBarStyleSheet(m);
+        QVERIFY2(!qss.contains(QLatin1Char('@')), qPrintable(qss));
+        QVERIFY(qss.contains(c.tabInactive));
+        QVERIFY(qss.contains(c.link));
     }
 }
 

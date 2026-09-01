@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 
+#include "DocumentArea.h"
+
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QFileInfo>
@@ -31,12 +33,23 @@ int main(int argc, char *argv[])
 
     const QStringList args = parser.positionalArguments();
     if (!args.isEmpty()) {
-        w.openFile(args.first());
+        // 命令列可以一次給多個檔案，每個開一個分頁
+        for (const QString &a : args)
+            w.openFile(a);
     } else {
-        // 沒給參數就接續上次的檔案
-        const QString last = QSettings().value(QStringLiteral("files/lastFile")).toString();
-        if (!last.isEmpty() && QFileInfo(last).isFile())
-            w.openFile(last);
+        // 沒給參數就還原上次開著的分頁
+        QSettings settings;
+        const QStringList tabs = settings.value(QStringLiteral("files/openTabs")).toStringList();
+        for (const QString &p : tabs)
+            if (QFileInfo(p).isFile())
+                w.openFile(p);
+
+        if (tabs.isEmpty()) {
+            const QString last = settings.value(QStringLiteral("files/lastFile")).toString();
+            if (!last.isEmpty() && QFileInfo(last).isFile())
+                w.openFile(last);
+        }
+        w.area()->setActiveIndex(settings.value(QStringLiteral("files/activeTab"), 0).toInt());
     }
 
     return app.exec();

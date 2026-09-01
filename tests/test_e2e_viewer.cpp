@@ -20,6 +20,7 @@
 #include <QTreeView>
 #include <QTreeWidget>
 
+#include "DocumentView.h"
 #include "MainWindow.h"
 #include "PathBar.h"
 #include "Theme.h"
@@ -71,7 +72,13 @@ private:
     void writeFile(const QString &name, const QString &content) const;
     QString fixturePath(const QString &name) const;
 
-    QTextBrowser *browser() const { return m_win->findChild<QTextBrowser *>(); }
+    QTextBrowser *browser() const
+    {
+        // 多分頁之後不能用 m_win->findChild —— 那會抓到第一個建立的 view，
+        // 不一定是作用中的那個
+        DocumentView *v = m_win->activeView();
+        return v ? v->findChild<QTextBrowser *>() : nullptr;
+    }
     QTreeWidget *tocTree() const { return m_win->findChild<QTreeWidget *>(); }
     QTabWidget *sidebar() const { return m_win->findChild<QTabWidget *>(); }
     QTreeView *fileTree() const;
@@ -480,13 +487,16 @@ void TestE2eViewer::themeSwitchKeepsTocAndScroll()
 {
     QVERIFY(m_win->openFile(fixturePath(QStringLiteral("main.md"))));
 
-    browser()->verticalScrollBar()->setValue(120);
-    const int before = browser()->verticalScrollBar()->value();
-    const QColor bgBefore = browser()->palette().color(QPalette::Base);
-
     QAction *black = actionNamed(QStringLiteral("黑色主題"));
     QAction *white = actionNamed(QStringLiteral("白色主題"));
     QVERIFY(black && white);
+
+    // 明確設定起始主題，不要假設預設值（預設已改為黑色）
+    white->trigger();
+
+    browser()->verticalScrollBar()->setValue(120);
+    const int before = browser()->verticalScrollBar()->value();
+    const QColor bgBefore = browser()->palette().color(QPalette::Base);
 
     black->trigger();
     QTRY_VERIFY(browser()->palette().color(QPalette::Base) != bgBefore);

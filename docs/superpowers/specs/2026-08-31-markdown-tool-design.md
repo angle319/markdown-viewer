@@ -569,3 +569,175 @@ extension（body 16px）：
 
 **誠實記錄**：真正的 X11 拖放動作沒有被自動化測試涵蓋（這台沒有 xdotool
 之類的工具可以合成拖放序列），需要人工驗。
+
+## 18. 多文件：分頁與比較模式（2026-09-01，branch `feat/multi-document`）
+
+使用者的兩個需求：分頁開多份 markdown、分割畫面並排比較 2–4 份。
+決策：**一列分頁 + 比較模式**（非 VS Code 那種編輯器群組）、**不同步捲動**、
+**純並排不做 diff**。
+
+### 18.1 前置重構
+
+兩個功能需要同一個前置動作：把「單一文件的狀態」從 MainWindow 抽出來。
+原本 `m_path` / `m_markdown` / `m_doc` / `m_backend` / `m_watcher` 都掛在
+MainWindow 上，結構上只能開一份。
+
+- `DocumentView`：一份文件的完整狀態與畫面（path、原始碼、Document、
+  render backend、FileWatcher）。`MermaidCache` 由外部共用而非每份各持一份 ——
+  它的 key 是內容雜湊，不同文件裡相同的圖表本來就該共用。
+- `DocumentArea`：分頁列 + 比較模式的容器。
+
+重構完成時既有的 108 個測試全數通過，這是安全網。
+
+### 18.2 DocumentArea 的兩個設計選擇
+
+**所有 DocumentView 常駐同一個 QSplitter，靠 setVisible() 決定顯示哪幾個。**
+切換分頁與進出比較模式都不需要 reparent —— 把 widget 在容器之間搬移會丟掉
+捲動位置與焦點。
+
+**分頁順序的唯一真實來源是 QTabBar**：每個 tab 的 `tabData` 存對應的
+DocumentView 指標，所以使用者拖曳排序後不需要同步任何平行清單。
+
+比較模式顯示「從目前分頁起算連續 N 個」，右邊不夠時視窗往左滑
+（`start = clamp(min(current, count - columns))`），所以分頁數 >= N 時一定滿欄。
+
+### 18.3 踩到的坑：隱藏的 widget 不會排版
+
+第一版 `DocumentArea::openFile()` 是「建立 view（隱藏）→ 載入檔案 → 掛上分頁 →
+顯示」。結果所有圖片的尺寸都是 0。
+
+原因是隱藏的 widget 不會觸發 QTextDocument 排版，`loadResource()` 就不會被呼叫，
+`applyImageSizing()` 拿不到任何邏輯尺寸。
+
+兩處修正：
+1. 順序改成「掛上分頁並顯示 → 再載入檔案」。
+2. `applyImageSizing()` 加防禦：若某張圖沒有記錄到尺寸，主動呼叫
+   `doc->resource()` 逼 `loadResource` 跑一次。
+
+另一個相關的坑：`DocumentView` 必須自己關掉 `acceptDrops` ——
+分頁是動態建立的，MainWindow 在建構時遍歷子 widget 抓不到之後才出現的 view。
+
+### 18.4 連結導航留在同一分頁
+
+點連結若開新分頁，`INDEX.md` 那種 64 個連結的索引頁點幾下就爆掉。
+所以連結一律在觸發它的分頁內換檔，由 `linkNavigationStaysInSameTab()` 盯住。
+要另開分頁請用路徑列、檔案樹或拖曳。
+
+### 18.5 狀態列的錯誤比值
+
+比較模式截圖時發現狀態列出現「mermaid 3/2 產生中」—— 分子是全域佇列長度
+（三個分頁共用一個 MermaidCache），分母是當前文件的圖表數，比出來沒有意義。
+改成分開顯示：當前文件「mermaid N 張」，全域佇列「產生中 M 張」。
+
+### 18.6 記憶體
+
+| 情境 | PSS | RSS |
+|---|---|---|
+| 1 個分頁（sample.md） | 41.6 MB | 87.1 MB |
+| 3 個分頁（含 325 cell 的 INDEX.md） | 43.7 MB | 92.2 MB |
+
+**多開分頁的邊際成本比預估小得多** —— 我原本估 4 份會到 60–90MB，實際 3 份只比
+1 份多 2.1MB。Qt 函式庫本身才是大宗，每份 QTextDocument 反而便宜。
+所以「非作用中分頁延遲卸載」這個最佳化目前沒有必要做。
+
+### 18.7 測試
+
+新增 `tests/test_e2e_tabs.cpp`（16 個），總計 **8 個套件、124 個測試函式**。
+涵蓋：重複開檔不重複分頁、分頁標題來源、切分頁同步路徑列與 TOC、關閉最後一個
+分頁的空狀態、拖曳排序、**各分頁獨立監看自己的檔案**、連結留在同分頁、
+比較欄數與滑動視窗、主題與縮放套用到所有分頁。
+
+## 19. 改為 VS Code 式的 editor group（2026-09-01）
+
+### 19.1 為什麼改
+
+第一版做的是「一列全域分頁列 + 比較模式顯示連續 N 個」。使用者實際看到畫面後
+指出問題：**分頁列只在最左邊那一格上方，看不出哪個分頁對應哪一格**。
+分割成兩格時，第二個分頁的標籤畫在左格上方，但它的內容其實在右格。
+
+改成每個面板有自己的分頁列，這件事就變成自明的。
+
+### 19.2 結構
+
+```
+DocumentArea
+ └── QSplitter
+      ├── PaneGroup（PaneTabBar + QStackedWidget，自己的文件）
+      ├── PaneGroup
+      └── …（上限 4）
+```
+
+`PaneGroup` 持有它那一格的文件所有權，`addView()` 收下、`takeView()` 交出。
+`DocumentArea` 仍提供「全域索引」（面板順序 × 面板內分頁順序）給
+MainWindow 與設定持久化使用，所以 `openFile` / `nextTab` / `openPaths`
+這些介面沒有變。
+
+面板數量改由 `setPaneCount()` 控制：增加時從分頁最多的那一格勻一份出來，
+減少時把最後一格併回前一格。**不會做出空面板** —— 面板數不超過文件數。
+
+### 19.3 拖曳分頁自動分割
+
+QTabBar 內建的拖曳只能在同一列內重新排序。要支援拖到別的面板、或拖到邊緣
+自動分割，得自己接手：
+
+- `PaneTabBar` 在游標**垂直離開**分頁列時發起 QDrag。用垂直距離判斷是刻意的 ——
+  水平移動代表使用者想在同一列裡調順序，那條路徑要留給 QTabBar 自己處理。
+- `PaneGroup` 接受放置，左右各 25%（至少 40px）是「在該側分割」，中間是
+  「併入這一格」，並用 QRubberBand 顯示放置提示。
+- 來源資訊記在 `DocumentArea`（同一時間只有一個拖曳），不把指標塞進 mime data。
+
+**測試取捨**：合成跨 widget 的 QDrag 序列在測試裡跑不起來，所以放置邏輯抽成
+公開的 `moveTabToPane(source, index, target, zone)`，`dropEvent` 只是轉接。
+測試驗那個方法加上純邏輯的 `PaneGroup::zoneFor()`；真正的滑鼠拖曳動作
+仍需人工驗。
+
+### 19.4 作用中面板的標示
+
+`setActive()` 第一版用 `parentWidget()->children().size()` 判斷是否已分割，
+時機不對，結果強調線根本沒顯示 —— 是看截圖才發現的（測試當時沒有驗這件事）。
+改由 `DocumentArea::refreshPaneIndicators()` 明確告知，並補上
+`activePaneIsMarkedOnlyWhenSplit()` 驗證「只有一格時不顯示、分割後只有作用中
+那格顯示、切換時跟著移動」。
+
+教訓與 §14.4 同一類：**只在程式碼裡寫了不代表畫面上有**，宣稱之前要有測試或
+截圖為證。
+
+### 19.5 測試
+
+`e2e_tabs` 從 16 個增為 21 個，總計 **8 個套件、129 個測試函式**。
+新增：每格有自己的分頁列且內容正確、面板數不超過文件數、併回單格不遺失文件、
+搬到相鄰面板會新建一格、放置區判定、拖到邊緣分割、拖到中間併入、
+空面板自動收掉、作用中標示。
+
+## 20. 分割後的跑版與主題沒套用（2026-09-01）
+
+使用者實地拖曳分頁後回報兩個問題，都是只有在真實 X11 上才看得到的。
+
+### 20.1 新面板被擠成一條
+
+`QSplitter` 對新插入的 widget 只給 sizeHint 那麼寬，原本那格會霸住幾乎全部空間。
+實際結果是拖曳新建的面板只剩一百多 px，表格與行內 code 被逼到逐字換行。
+
+修法：結構變動後 `refreshLayout()` 平均分配寬度，並給 `PaneGroup`
+`setMinimumWidth(240)`。由 `panesGetComparableWidths()` 與
+`paneGeometryStaysSaneAfterMoves()` 裡的寬度斷言守住。
+
+### 20.2 拖放後的重繪殘影
+
+畫面上內容看起來蓋到分頁列。加了幾何不變式測試（每個 view 必須在某格的
+QStackedWidget 裡、只有當前分頁可見、內容落在分頁列下方）之後**測試是通過的**，
+所以不是幾何錯誤，而是 X11 在拖放結束後沒送重繪事件留下的殘影。
+`refreshLayout()` 明確對每一格與 splitter 呼叫 `update()`。
+
+寫那支不變式測試時自己先踩了一個錯：拿 `v->geometry()`（相對於 QStackedWidget）
+去比 `tabBar()->geometry()`（相對於 PaneGroup），兩個座標系不同，
+於是「測試失敗」其實是測試寫錯。改用 `mapTo()` 統一座標系後才是有效的斷言。
+
+### 20.3 主題沒有在啟動時套用
+
+視窗是深藍灰色 —— 既不是白色主題也不是黑色主題，而是系統 GTK 主題的底色。
+原因是 `setMode()` 的 early return：啟動時 `m_mode` 已經等於要設的值，就直接
+跳過了 palette 套用。加一個 `m_themeApplied` 旗標，**啟動時無條件套一次**。
+
+同時把預設主題改為黑色。連帶要修一支測試 —— 它原本假設啟動是白色主題，
+改成明確先切白色再測切換，不要依賴預設值。

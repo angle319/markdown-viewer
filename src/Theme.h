@@ -56,6 +56,9 @@ public:
         /// 行內 `code` 的底色（已把強調色以低透明度混進頁面底色，
         /// 因為 Qt rich-text 對 rgba() 的支援不可靠，改用預先算好的實色）。
         QString codeInlineBackground;
+        /// 未選取分頁的底色。選取中的分頁用頁面底色（視覺上與內容連成一體），
+        /// 未選取的則沉下去一階，這樣「焦點在哪個分頁」一眼看得出來。
+        QString tabInactive;
         QString border;
         // 註：引用區塊沒有左側色條 —— Qt rich-text 不支援 border-left，
         // 只能靠縮排表現，所以這裡刻意沒有 quoteBar 這種欄位。
@@ -64,6 +67,9 @@ public:
 
     static const Colors &colors(Mode m);
     static QString documentStyleSheet(Mode m);
+    /// 分頁列的 QSS。palette 不足以把「選取／未選取」拉開足夠對比，
+    /// QTabBar 的選取狀態預設只差一點點底色。
+    static QString tabBarStyleSheet(Mode m);
     static QPalette palette(Mode m);
 
     static QString name(Mode m);
